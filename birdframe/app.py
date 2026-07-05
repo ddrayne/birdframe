@@ -26,10 +26,17 @@ log = logging.getLogger("birdframe")
 
 def _setup_logging() -> None:
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    handlers: list[logging.Handler] = [logging.FileHandler(LOG_PATH)]
+    # Add a console handler only when attached to a terminal (a foreground run).
+    # Under launchd, stdout+stderr are already redirected to this same log file,
+    # so a StreamHandler would write every line to it a second time.
+    if sys.stderr is not None and sys.stderr.isatty():
+        handlers.append(logging.StreamHandler())
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
-        handlers=[logging.FileHandler(LOG_PATH), logging.StreamHandler()],
+        handlers=handlers,
+        force=True,  # own the root config even if an imported lib pre-configured it
     )
 
 
