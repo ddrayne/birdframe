@@ -5,13 +5,25 @@ from fastapi.testclient import TestClient
 from birdframe.web.app import create_app, AppContext
 from birdframe.config import Config
 from birdframe.store import Store, Detection
+from birdframe.styles import save_style
+
+
+class FakeImageClient:
+    def __init__(self):
+        self.prompts = []
+
+    def generate(self, prompt):
+        self.prompts.append(prompt)
+        return b"PREVIEWPNG"
 
 
 class FakeArtist:
-    def __init__(self, out_path):
+    def __init__(self, out_path, image_client=None, styles=None):
         self.calls = 0
         self.forced = []
         self.out_path = out_path
+        self.image_client = image_client
+        self.styles = styles or []
 
     def generate(self, when, force_paid=False, species_days=None):
         self.calls += 1
@@ -43,14 +55,19 @@ class FakePublisher:
         return FakePublishResult()
 
 
-def _client(tmp_path):
+def _client(tmp_path, image_client=None):
     store = Store(tmp_path / "db.sqlite")
     store.add_detection(Detection(datetime(2026, 7, 5, 6), "Erithacus rubecula", "European Robin", 0.9))
     config = Config.load(tmp_path / "config.toml")
+    styles_dir = tmp_path / "styles"
+    save_style(styles_dir, "ukiyo-e", "A woodblock of {scene}.", "gradients")
+    save_style(styles_dir, "linocut", "A linocut of {scene}.")
     applied = []
-    ctx = AppContext(store=store, artist=FakeArtist(tmp_path / "img.png"),
+    ctx = AppContext(store=store,
+                     artist=FakeArtist(tmp_path / "img.png", image_client=image_client),
                      publisher=FakePublisher(), now=lambda: datetime(2026, 7, 5, 12),
-                     config=config, apply_settings=lambda: applied.append(True))
+                     config=config, apply_settings=lambda: applied.append(True),
+                     styles_dir=styles_dir, preview_dir=tmp_path / "previews")
     ctx._applied = applied
     return store, ctx, TestClient(create_app(ctx))
 
@@ -147,3 +164,68 @@ def test_post_settings_rejects_bad_value_and_unknown_key(tmp_path):
     assert "max_paid_images_per_day" in resp.json()["fields"]
     resp2 = client.post("/api/settings", json={"latitude": 10.0})  # not in editable list
     assert resp2.status_code == 400
+
+
+def test_list_styles_includes_sample_prompt_and_pinned(tmp_path):
+    _, ctx, client = _client(tmp_path)
+    ctx.config.style_mode = "pinned"
+    ctx.config.pinned_style = "linocut"
+    data = client.get("/api/styles").json()
+    names = {s["name"] for s in data["styles"]}
+    assert {"ukiyo-e", "linocut"} <= names
+    lino = next(s for s in data["styles"] if s["name"] == "linocut")
+    assert lino["pinned"] is True
+    assert "linocut of" in lino["sample_prompt"].lower()
+    assert data["key_set"] is False  # no image client in this fixture
+
+
+def test_create_and_reload_style(tmp_path):
+    _, ctx, client = _client(tmp_path)
+    resp = client.put("/api/styles/new", json={"name": "Bauhaus Poster",
+                                               "prompt": "A Bauhaus poster of {scene}.",
+                                               "avoid": "clutter"})
+    assert resp.status_code == 200
+    assert resp.json()["saved"] == "bauhaus-poster"
+    # reloaded onto the (fake) artist
+    assert "bauhaus-poster" in {s.name for s in ctx.artist.styles}
+    assert "bauhaus-poster" in {s["name"] for s in client.get("/api/styles").json()["styles"]}
+
+
+def test_create_style_rejects_missing_placeholder(tmp_path):
+    _, _, client = _client(tmp_path)
+    resp = client.put("/api/styles/x", json={"name": "x", "prompt": "no placeholder"})
+    assert resp.status_code == 400
+
+
+def test_delete_style_but_not_the_last(tmp_path):
+    _, _, client = _client(tmp_path)
+    assert client.delete("/api/styles/linocut").json()["deleted"] is True
+    # only ukiyo-e remains; refuse to delete it
+    resp = client.delete("/api/styles/ukiyo-e")
+    assert resp.status_code == 400
+
+
+def test_pin_and_unpin(tmp_path):
+    _, ctx, client = _client(tmp_path)
+    assert client.post("/api/styles/ukiyo-e/pin").json()["pinned"] == "ukiyo-e"
+    assert ctx.config.style_mode == "pinned"
+    assert ctx.config.pinned_style == "ukiyo-e"
+    client.post("/api/styles/unpin")
+    assert ctx.config.style_mode == "rotate"
+
+
+def test_preview_requires_key(tmp_path):
+    _, _, client = _client(tmp_path)  # no image client
+    resp = client.post("/api/styles/ukiyo-e/preview")
+    assert resp.status_code == 400
+
+
+def test_preview_generates_and_serves_image(tmp_path):
+    fake_client = FakeImageClient()
+    _, ctx, client = _client(tmp_path, image_client=fake_client)
+    resp = client.post("/api/styles/ukiyo-e/preview")
+    assert resp.status_code == 200
+    assert "woodblock" in fake_client.prompts[0].lower()   # used the style's prompt
+    img = client.get("/api/styles/ukiyo-e/preview.png")
+    assert img.status_code == 200
+    assert img.content == b"PREVIEWPNG"

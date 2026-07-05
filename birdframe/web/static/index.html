@@ -80,6 +80,26 @@
   .chips { display:flex; flex-wrap:wrap; gap:6px; }
   .chip { background:color-mix(in srgb, var(--accent) 15%, transparent);
     color:var(--accent); border-radius:999px; padding:3px 10px; font-size:13px; }
+  .stylecard { display:flex; gap:14px; align-items:flex-start; }
+  .stylecard .thumb { width:96px; height:128px; border-radius:8px; object-fit:cover;
+    border:1px solid var(--line); background:var(--line); flex:none; }
+  .stylecard .thumb.none { display:flex; align-items:center; justify-content:center;
+    color:var(--muted); font-size:11px; text-align:center; padding:6px; }
+  .stylecard .body { flex:1; min-width:0; }
+  .stylecard .prompt { color:var(--muted); font-size:14px; margin:4px 0 10px; }
+  .badge { background:var(--accent); color:#fff; border-radius:999px; padding:2px 9px;
+    font-size:12px; margin-left:8px; }
+  .style-actions { display:flex; flex-wrap:wrap; gap:8px; }
+  textarea { width:100%; font:inherit; padding:8px 10px; border:1px solid var(--line);
+    border-radius:8px; background:var(--card); color:var(--ink); resize:vertical; box-sizing:border-box; }
+  .promptpreview { background:color-mix(in srgb, var(--accent) 8%, transparent);
+    border:1px solid var(--line); border-radius:8px; padding:10px 12px; font-size:13px;
+    color:var(--ink); white-space:pre-wrap; }
+  .editor-actions { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:14px; }
+  #editorPreview img { max-width:320px; border-radius:10px; border:1px solid var(--line);
+    margin-top:14px; }
+  code { background:color-mix(in srgb, var(--accent) 12%, transparent); padding:1px 5px;
+    border-radius:4px; font-size:.9em; }
 </style>
 </head>
 <body>
@@ -92,6 +112,7 @@
     <button data-tab="now" class="active">Now</button>
     <button data-tab="today">Today</button>
     <button data-tab="gallery">Gallery</button>
+    <button data-tab="styles">Styles</button>
     <button data-tab="settings">Settings</button>
   </nav>
 
@@ -129,6 +150,38 @@
     <div class="gallery" id="galleryGrid"></div>
   </section>
 
+  <section id="styles" hidden>
+    <div class="toolbar">
+      <button class="btn" id="newStyle" type="button">New style</button>
+      <span class="status" id="stylesKeyNote"></span>
+    </div>
+    <div id="stylesList"></div>
+
+    <div id="styleEditor" hidden>
+      <h3 class="mini" id="editorTitle">Edit style</h3>
+      <div class="card">
+        <div class="setfield"><label>Name</label>
+          <input id="styleName" placeholder="e.g. Bauhaus Poster"></div>
+        <label class="mini" style="display:block;margin-top:12px">Prompt
+          <span class="hint">— must contain <code>{scene}</code>, which birdframe fills with the day's birds</span></label>
+        <textarea id="stylePrompt" rows="5"></textarea>
+        <label class="mini" style="display:block;margin-top:12px">Avoid <span class="hint">(optional)</span></label>
+        <textarea id="styleAvoid" rows="2"></textarea>
+        <div style="margin-top:12px">
+          <div class="mini">Assembled prompt (with today's sample birds)</div>
+          <div class="promptpreview" id="assembledPrompt"></div>
+        </div>
+        <div class="editor-actions">
+          <button class="btn" id="saveStyle" type="button">Save style</button>
+          <button class="btn ghost" id="previewStyle" type="button">Generate example image</button>
+          <button class="btn ghost" id="cancelStyle" type="button">Cancel</button>
+          <span class="status" id="styleStatus"></span>
+        </div>
+        <div id="editorPreview"></div>
+      </div>
+    </div>
+  </section>
+
   <section id="settings" hidden>
     <form id="settingsForm"></form>
     <div class="toolbar" style="margin-top:16px">
@@ -145,11 +198,12 @@ let activeTab = 'now';
 tabs.forEach(b => b.onclick = () => {
   activeTab = b.dataset.tab;
   tabs.forEach(x => x.classList.toggle('active', x === b));
-  ['now','today','gallery','settings'].forEach(t => $('#'+t).hidden = activeTab !== t);
+  ['now','today','gallery','styles','settings'].forEach(t => $('#'+t).hidden = activeTab !== t);
   if (activeTab === 'gallery') loadGallery();
   if (activeTab === 'settings') loadSettings();
   if (activeTab === 'now') loadNow();
   if (activeTab === 'today') loadToday();
+  if (activeTab === 'styles') loadStyles();
 });
 
 // ---- Now Listening (live) ----
@@ -286,9 +340,109 @@ async function repost(id) {
   alert('Re-post: ' + r.publish + (r.detail ? ' — ' + r.detail : ''));
 }
 
+// ---- Styles editor ----
+let stylesData = {styles:[], sample_scene:'', key_set:false};
+let editingOriginal = null;   // slug being edited, or null when creating new
+
+function esc(s){ return (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+async function loadStyles() {
+  stylesData = await (await fetch('/api/styles')).json();
+  $('#stylesKeyNote').textContent = stylesData.key_set
+    ? '' : 'Set an OpenAI key to generate example images.';
+  $('#styleEditor').hidden = true;
+  $('#stylesList').hidden = false;
+  $('#stylesList').innerHTML = stylesData.styles.map(s => `
+    <div class="card stylecard">
+      ${s.has_preview
+        ? `<img class="thumb" src="/api/styles/${s.name}/preview.png?t=${Date.now()}" alt="">`
+        : `<div class="thumb none">no example yet</div>`}
+      <div class="body">
+        <div class="name">${esc(s.name)}${s.pinned?'<span class="badge">pinned</span>':''}</div>
+        <div class="prompt">${esc(s.prompt)}</div>
+        <div class="style-actions">
+          <button class="btn ghost" onclick="editStyle('${s.name}')">Edit</button>
+          ${s.pinned
+            ? `<button class="btn ghost" onclick="unpinStyle()">Unpin</button>`
+            : `<button class="btn ghost" onclick="pinStyle('${s.name}')">Pin</button>`}
+          <button class="btn ghost" onclick="deleteStyle('${s.name}')">Delete</button>
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+function openEditor(style) {
+  editingOriginal = style ? style.name : null;
+  $('#editorTitle').textContent = style ? `Edit “${style.name}”` : 'New style';
+  $('#styleName').value = style ? style.name : '';
+  $('#stylePrompt').value = style ? style.prompt : 'A ??? of {scene}.';
+  $('#styleAvoid').value = style ? style.avoid : 'photorealism, gradients, text, watermarks';
+  $('#styleStatus').textContent = '';
+  $('#editorPreview').innerHTML = style && style.has_preview
+    ? `<img src="/api/styles/${style.name}/preview.png?t=${Date.now()}" alt="example">` : '';
+  $('#stylesList').hidden = true;
+  $('#styleEditor').hidden = false;
+  updateAssembled();
+}
+function editStyle(name){ openEditor(stylesData.styles.find(s => s.name === name)); }
+
+function updateAssembled() {
+  const p = $('#stylePrompt').value, a = $('#styleAvoid').value.trim();
+  let out = p.replace('{scene}', stylesData.sample_scene);
+  if (a) out += '\n\nAvoid: ' + a;
+  $('#assembledPrompt').textContent = out;
+}
+
+async function saveStyle() {
+  const name = $('#styleName').value.trim();
+  const prompt = $('#stylePrompt').value;
+  if (!prompt.includes('{scene}')) { $('#styleStatus').textContent = 'Prompt must contain {scene}.'; return; }
+  const r = await fetch('/api/styles/' + encodeURIComponent(name || 'style'), {
+    method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name, prompt, avoid: $('#styleAvoid').value})});
+  const res = await r.json();
+  if (!r.ok) { $('#styleStatus').textContent = 'Error: ' + res.error; return; }
+  await loadStyles();
+}
+
+async function previewStyle() {
+  if (!stylesData.key_set) { $('#styleStatus').textContent = 'Set an OpenAI key first (birdframe set-key).'; return; }
+  // Save first so the preview reflects the current prompt.
+  const name = $('#styleName').value.trim();
+  const prompt = $('#stylePrompt').value;
+  if (!prompt.includes('{scene}')) { $('#styleStatus').textContent = 'Prompt must contain {scene}.'; return; }
+  $('#previewStyle').disabled = true;
+  $('#styleStatus').textContent = 'Painting an example (this costs one image)…';
+  await fetch('/api/styles/' + encodeURIComponent(name), {method:'PUT',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name, prompt, avoid: $('#styleAvoid').value})});
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+  const r = await fetch('/api/styles/' + slug + '/preview', {method:'POST'});
+  const res = await r.json();
+  $('#previewStyle').disabled = false;
+  if (!r.ok) { $('#styleStatus').textContent = 'Error: ' + res.error; return; }
+  $('#styleStatus').textContent = 'Example ready.';
+  $('#editorPreview').innerHTML = `<img src="/api/styles/${slug}/preview.png?t=${Date.now()}" alt="example">`;
+}
+
+async function pinStyle(name){ await fetch('/api/styles/'+name+'/pin', {method:'POST'}); loadStyles(); }
+async function unpinStyle(){ await fetch('/api/styles/unpin', {method:'POST'}); loadStyles(); }
+async function deleteStyle(name){
+  const r = await fetch('/api/styles/'+name, {method:'DELETE'});
+  if (!r.ok) { alert((await r.json()).error); return; }
+  loadStyles();
+}
+
 $('#postNow').onclick = postNow;
 $('#saveSettings').onclick = saveSettings;
 $('#captureBtn').onclick = capture;
+$('#newStyle').onclick = () => openEditor(null);
+$('#saveStyle').onclick = saveStyle;
+$('#previewStyle').onclick = previewStyle;
+$('#cancelStyle').onclick = loadStyles;
+document.addEventListener('input', e => {
+  if (e.target.id === 'stylePrompt' || e.target.id === 'styleAvoid') updateAssembled();
+});
 loadNow();
 setInterval(() => { if (activeTab === 'now') loadNow(); }, 4000);
 setInterval(() => { if (activeTab === 'today') loadToday(); }, 30000);

@@ -40,6 +40,8 @@ class AppContext:
     now: Callable[[], datetime] = datetime.now
     config: object = None
     apply_settings: Callable[[], None] = None
+    styles_dir: object = None
+    preview_dir: object = None
 
 
 def create_app(ctx: AppContext) -> FastAPI:
@@ -143,6 +145,105 @@ def create_app(ctx: AppContext) -> FastAPI:
             return JSONResponse({"error": "no such image"}, status_code=404)
         result = _publish(ctx, rec)
         return {"image_id": rec.id, "publish": result.status, "detail": result.detail}
+
+    # ---- Styles editor ----
+    from birdframe import styles as stylemod
+    from birdframe.rollup import build_prompt
+
+    def _reload_styles():
+        if ctx.styles_dir and hasattr(ctx.artist, "styles"):
+            ctx.artist.styles = stylemod.load_styles(ctx.styles_dir)
+
+    def _is_pinned(name: str) -> bool:
+        cfg = ctx.config
+        return bool(cfg and cfg.style_mode == "pinned" and cfg.pinned_style == name)
+
+    def _preview_path(slug: str):
+        return Path(ctx.preview_dir) / f"{slug}.png" if ctx.preview_dir else None
+
+    @app.get("/api/styles")
+    def list_styles():
+        items = []
+        for s in stylemod.load_styles(ctx.styles_dir):
+            pp = _preview_path(s.name)
+            items.append({
+                "name": s.name, "prompt": s.prompt, "avoid": s.avoid,
+                "pinned": _is_pinned(s.name),
+                "has_preview": bool(pp and pp.exists()),
+                "sample_prompt": build_prompt(s, stylemod.SAMPLE_SCENE),
+            })
+        return {"styles": items, "sample_scene": stylemod.SAMPLE_SCENE,
+                "key_set": getattr(ctx.artist, "image_client", None) is not None}
+
+    @app.put("/api/styles/{name}")
+    async def save_style_ep(name: str, request: Request):
+        body = await request.json()
+        try:
+            slug = stylemod.save_style(ctx.styles_dir, body.get("name", name),
+                                       body.get("prompt", ""), body.get("avoid", ""))
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        _reload_styles()
+        return {"saved": slug}
+
+    @app.delete("/api/styles/{name}")
+    def delete_style_ep(name: str):
+        if len(stylemod.load_styles(ctx.styles_dir)) <= 1:
+            return JSONResponse({"error": "can't delete the last style"}, status_code=400)
+        ok = stylemod.delete_style(ctx.styles_dir, name)
+        pp = _preview_path(stylemod.slugify(name))
+        if pp and pp.exists():
+            pp.unlink()
+        _reload_styles()
+        return {"deleted": ok}
+
+    @app.post("/api/styles/{name}/pin")
+    def pin_style(name: str):
+        style = stylemod.get_style(ctx.styles_dir, name)
+        if style is None:
+            return JSONResponse({"error": "no such style"}, status_code=404)
+        ctx.config.style_mode = "pinned"
+        ctx.config.pinned_style = style.name
+        ctx.config.save()
+        if ctx.apply_settings:
+            ctx.apply_settings()
+        return {"pinned": style.name}
+
+    @app.post("/api/styles/unpin")
+    def unpin_style():
+        ctx.config.style_mode = "rotate"
+        ctx.config.save()
+        if ctx.apply_settings:
+            ctx.apply_settings()
+        return {"mode": "rotate"}
+
+    @app.post("/api/styles/{name}/preview")
+    def make_preview(name: str):
+        style = stylemod.get_style(ctx.styles_dir, name)
+        if style is None:
+            return JSONResponse({"error": "no such style"}, status_code=404)
+        client = getattr(ctx.artist, "image_client", None)
+        if client is None:
+            return JSONResponse(
+                {"error": "set an OpenAI key (birdframe set-key) to generate previews"},
+                status_code=400)
+        prompt = build_prompt(style, stylemod.SAMPLE_SCENE)
+        try:
+            art = client.generate(prompt)
+        except Exception as exc:
+            return JSONResponse({"error": f"image generation failed: {exc}"},
+                                status_code=502)
+        pp = _preview_path(style.name)
+        pp.parent.mkdir(parents=True, exist_ok=True)
+        pp.write_bytes(art)
+        return {"ok": True, "name": style.name}
+
+    @app.get("/api/styles/{name}/preview.png")
+    def get_preview(name: str):
+        pp = _preview_path(stylemod.slugify(name))
+        if not pp or not pp.exists():
+            return JSONResponse({"error": "no preview yet"}, status_code=404)
+        return FileResponse(pp, media_type="image/png")
 
     @app.get("/api/settings")
     def get_settings():

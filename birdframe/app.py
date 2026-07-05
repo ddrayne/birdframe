@@ -124,9 +124,13 @@ def _start_dashboard(runtime: Runtime, config: Config) -> None:
         runtime.publisher.hold_minutes = config.frame_hold_minutes
         runtime.publisher.saturation = config.frame_saturation
 
+    from birdframe.styles import DEFAULT_STYLES_DIR
+
     ctx = AppContext(store=runtime.store, artist=runtime.artist,
                      publisher=runtime.publisher, config=config,
-                     apply_settings=apply_settings)
+                     apply_settings=apply_settings,
+                     styles_dir=DEFAULT_STYLES_DIR,
+                     preview_dir=DATA_DIR / "style_previews")
     app = create_app(ctx)
     server = uvicorn.Server(uvicorn.Config(
         app, host="127.0.0.1", port=config.dashboard_port, log_level="warning"))
