@@ -34,37 +34,53 @@ best-of clips per species are kept, so you can listen back).
 The dashboard is installable as a PWA and reachable from your phone on the same
 network.
 
-## Setup
+**Requirements:** macOS (Apple Silicon or Intel) and [Homebrew](https://brew.sh).
+Python 3.12 is fetched automatically by `uv` — you don't need it pre-installed.
+
+## Install (one line)
+
+```sh
+git clone https://github.com/ddrayne/birdframe && cd birdframe
+./install.sh
+```
+
+The installer sets up `uv` + `libsndfile`, syncs dependencies, offers to store
+your OpenAI key, runs a setup check, installs the background service, and creates
+a **Birdframe.app** in `~/Applications`. Grant microphone access when macOS asks.
+
+Then open the dashboard at **http://localhost:8355** — or, on your phone on the
+same network, the LAN URL printed at startup. Double-clicking **Birdframe.app**
+(Spotlight → "Birdframe") ensures it's running and opens the dashboard.
+
+Set your **location** and everything else in the dashboard's **Settings** tab.
+Without an OpenAI key birdframe still runs and posts a tidy text poster instead
+of a painting; the key lives in the macOS Keychain (or the `OPENAI_API_KEY`
+environment variable).
+
+### Manual setup
 
 ```sh
 brew install uv libsndfile
 uv sync --extra dev
-
-# Store your OpenAI key (hidden prompt → macOS Keychain, never on disk):
-uv run birdframe set-key
-
-# Check everything's ready (location, key, mic, frame):
-uv run birdframe doctor
-
-# Run it (grants microphone access on first launch):
-uv run birdframe
+uv run birdframe set-key      # optional; store the OpenAI key
+uv run birdframe doctor       # check location, key, mic, frame
+uv run birdframe              # run in the foreground
 ```
 
-Open the dashboard at **http://localhost:8355** (or the LAN URL printed at
-startup, from your phone). Set your **location** and everything else in the
-**Settings** tab — the OpenAI key can also be supplied via the `OPENAI_API_KEY`
-environment variable.
+## Running as a service
 
-Without an OpenAI key birdframe still runs and posts a tidy text poster instead
-of a painting.
-
-## Run forever
+birdframe manages its own macOS LaunchAgent — no `launchctl` needed:
 
 ```sh
-bash packaging/install.sh
+uv run birdframe install      # start at login and keep running (restarts on crash)
+uv run birdframe status       # is it installed / running?
+uv run birdframe restart      # after changing restart-required settings
+uv run birdframe stop         # / start
+uv run birdframe logs         # follow the log
+uv run birdframe uninstall    # remove the service (data & settings untouched)
+uv run birdframe make-app     # (re)create ~/Applications/Birdframe.app
 ```
 
-Installs a LaunchAgent that starts birdframe at login and restarts it on crash.
 Logs: `~/Library/Logs/birdframe.log`. Data (SQLite, images, clips):
 `~/.local/share/birdframe/`. Settings: `~/.config/birdframe/config.toml`.
 

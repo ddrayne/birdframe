@@ -248,17 +248,40 @@ def _doctor() -> int:
     return 0
 
 
+_SERVICE_CMDS = {"install", "uninstall", "start", "stop", "restart", "status", "make-app", "logs"}
+
+
+def _run_service(cmd: str) -> int:
+    from birdframe import service
+    if cmd == "logs":
+        subprocess.run(["tail", "-f", str(service.LOG_PATH)], check=False)
+        return 0
+    fn = {"install": service.install, "uninstall": service.uninstall,
+          "start": service.start, "stop": service.stop, "restart": service.restart,
+          "status": service.status, "make-app": service.make_app}[cmd]
+    print(fn())
+    return 0
+
+
 def main() -> None:
     argv = sys.argv[1:]
     if argv and argv[0] == "set-key":
         raise SystemExit(_set_key_interactive())
     if argv and argv[0] == "doctor":
         raise SystemExit(_doctor())
+    if argv and argv[0] in _SERVICE_CMDS:
+        raise SystemExit(_run_service(argv[0]))
     if argv and argv[0] in ("-h", "--help"):
-        print("Usage: birdframe [set-key|doctor]\n"
-              "  (no args)  run the listener, menu bar, and dashboard\n"
+        print("Usage: birdframe [command]\n\n"
+              "  (no args)  run the listener, menu bar, and dashboard in the foreground\n"
               "  set-key    store your OpenAI API key in the macOS Keychain\n"
-              "  doctor     check location, key, microphone and frame")
+              "  doctor     check location, key, microphone and frame\n\n"
+              "Run it forever (background service):\n"
+              "  install    start at login and keep running (LaunchAgent)\n"
+              "  uninstall  remove the background service\n"
+              "  start / stop / restart / status\n"
+              "  logs       follow the log\n"
+              "  make-app   create a double-clickable Birdframe.app in ~/Applications")
         raise SystemExit(0)
 
     _setup_logging()
