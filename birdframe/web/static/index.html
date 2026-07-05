@@ -179,6 +179,28 @@
   .gallery img { width:100%; aspect-ratio:3/4; object-fit:cover; border-radius:10px;
     border:1px solid var(--line); background:var(--surface-2); }
   .gallery figcaption { font-size:12px; color:var(--muted); margin-top:5px; }
+  .gallery img { cursor:zoom-in; transition:transform .12s; }
+  .gallery img:hover { transform:scale(1.015); }
+  /* Lightbox */
+  .lightbox { position:fixed; inset:0; z-index:100; display:flex; align-items:center;
+    justify-content:center; padding:24px; opacity:0; pointer-events:none;
+    background:rgba(8,10,7,.92); backdrop-filter:blur(3px); transition:opacity .18s; }
+  .lightbox.show { opacity:1; pointer-events:auto; }
+  .lightbox img { max-width:min(90vw,700px); max-height:82vh; object-fit:contain;
+    border-radius:10px; box-shadow:0 24px 70px rgba(0,0,0,.6); }
+  .lb-btn { position:fixed; background:rgba(255,255,255,.10); color:#fff; border:none;
+    cursor:pointer; border-radius:999px; display:flex; align-items:center; justify-content:center;
+    transition:background .15s; }
+  .lb-btn:hover { background:rgba(255,255,255,.22); }
+  .lb-close { top:16px; right:16px; width:40px; height:40px; font-size:18px; }
+  .lb-nav { top:50%; transform:translateY(-50%); width:46px; height:46px; font-size:26px; line-height:1; }
+  .lb-prev { left:16px; } .lb-next { right:16px; }
+  .lb-caption { position:fixed; left:0; right:0; bottom:0; padding:16px 20px calc(16px + env(safe-area-inset-bottom));
+    background:linear-gradient(transparent, rgba(8,10,7,.85)); color:#f2f2ee; text-align:center; }
+  .lb-caption .lb-title { font-family:var(--serif); font-size:18px; }
+  .lb-caption .lb-sub { color:#c9ccc2; font-size:13.5px; margin-top:3px; }
+  .lb-caption .btn { margin-top:10px; }
+  @media (max-width:560px){ .lb-nav{ width:40px; height:40px; font-size:22px; } }
 
   /* Styles + settings */
   .stylecard { display:flex; gap:15px; align-items:flex-start; }
@@ -304,6 +326,14 @@
 </main>
 
 <div id="birdcard"></div>
+
+<div id="lightbox" class="lightbox" aria-hidden="true">
+  <button class="lb-btn lb-close" id="lbClose" aria-label="Close">✕</button>
+  <button class="lb-btn lb-nav lb-prev" id="lbPrev" aria-label="Previous">‹</button>
+  <img id="lbImg" alt="">
+  <button class="lb-btn lb-nav lb-next" id="lbNext" aria-label="Next">›</button>
+  <div class="lb-caption" id="lbCaption"></div>
+</div>
 
 <script>
 const $ = s => document.querySelector(s);
@@ -453,16 +483,55 @@ async function postNow() {
 }
 
 // ---- Gallery ----
+let galleryImages = [];
 async function loadGallery() {
   const d = await (await fetch('/api/history')).json();
-  $('#galleryGrid').innerHTML = d.images.length ? d.images.map(i=>`
-    <figure><img src="/api/image/${i.id}" loading="lazy" alt="${esc(i.style)}">
+  galleryImages = d.images;
+  $('#galleryGrid').innerHTML = d.images.length ? d.images.map((i,idx)=>`
+    <figure><img src="/api/image/${i.id}" loading="lazy" alt="${esc(i.style)}" onclick="openLightbox(${idx})">
       <figcaption>${i.generated_at.slice(0,10)} · ${esc(i.style)}<br>
         <button class="btn ghost small" onclick="repost(${i.id})">Re-post</button></figcaption>
     </figure>`).join('') : '<div class="empty">No pictures yet. Capture some birds, or make today’s picture.</div>';
 }
 async function repost(id){ const r = await (await fetch('/api/repost/'+id,{method:'POST'})).json();
   alert('Re-post: '+r.publish+(r.detail?' — '+r.detail:'')); }
+
+// ---- Lightbox ----
+let lbIndex = -1;
+function openLightbox(idx) {
+  lbIndex = idx; renderLightbox();
+  $('#lightbox').classList.add('show'); $('#lightbox').setAttribute('aria-hidden','false');
+}
+function closeLightbox() {
+  $('#lightbox').classList.remove('show'); $('#lightbox').setAttribute('aria-hidden','true'); lbIndex = -1;
+}
+function stepLightbox(delta) {
+  if (lbIndex < 0) return;
+  lbIndex = (lbIndex + delta + galleryImages.length) % galleryImages.length; renderLightbox();
+}
+function renderLightbox() {
+  const i = galleryImages[lbIndex]; if (!i) return;
+  $('#lbImg').src = '/api/image/' + i.id;
+  const species = (i.species||[]).join(', ') || 'a quiet day';
+  const posted = i.posted_at ? ' · shown on the frame' : '';
+  $('#lbCaption').innerHTML = `
+    <div class="lb-title">${i.generated_at.slice(0,10)} — ${esc(i.style)}</div>
+    <div class="lb-sub">${esc(species)}${posted}</div>
+    <button class="btn small" onclick="repost(${i.id})">Re-post to frame</button>`;
+  const multi = galleryImages.length > 1;
+  $('#lbPrev').style.display = multi ? '' : 'none';
+  $('#lbNext').style.display = multi ? '' : 'none';
+}
+$('#lbClose').onclick = closeLightbox;
+$('#lbPrev').onclick = () => stepLightbox(-1);
+$('#lbNext').onclick = () => stepLightbox(1);
+$('#lightbox').addEventListener('click', e => { if (e.target.id === 'lightbox') closeLightbox(); });
+document.addEventListener('keydown', e => {
+  if (lbIndex < 0) return;
+  if (e.key === 'Escape') closeLightbox();
+  else if (e.key === 'ArrowLeft') stepLightbox(-1);
+  else if (e.key === 'ArrowRight') stepLightbox(1);
+});
 
 // ---- Styles ----
 let stylesData = {styles:[], sample_scene:'', key_set:false};
