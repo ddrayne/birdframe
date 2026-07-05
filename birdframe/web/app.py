@@ -51,6 +51,68 @@ def create_app(ctx: AppContext) -> FastAPI:
     def index():
         return FileResponse(STATIC / "index.html")
 
+    # ---- PWA: installable to the dock / home screen ----
+    @app.get("/manifest.webmanifest")
+    def manifest():
+        return JSONResponse({
+            "name": "birdframe", "short_name": "birdframe",
+            "description": "Birds heard at the window in Edinburgh",
+            "start_url": "/", "display": "standalone",
+            "background_color": "#14170F", "theme_color": "#2E6A4F",
+            "icons": [
+                {"src": "/icon-192.png", "sizes": "192x192", "type": "image/png"},
+                {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png",
+                 "purpose": "any maskable"},
+            ],
+        }, media_type="application/manifest+json")
+
+    @app.get("/sw.js")
+    def service_worker():
+        return FileResponse(STATIC / "sw.js", media_type="text/javascript")
+
+    def _icon(size: int) -> bytes:
+        from birdframe.icon import render_icon
+        return render_icon(size)
+
+    @app.get("/icon-192.png")
+    def icon192():
+        from fastapi.responses import Response
+        return Response(_icon(192), media_type="image/png")
+
+    @app.get("/icon-512.png")
+    def icon512():
+        from fastapi.responses import Response
+        return Response(_icon(512), media_type="image/png")
+
+    # ---- Wikipedia enrichment (proxied + cached to be kind to their API) ----
+    _wiki_cache: dict[str, dict] = {}
+
+    @app.get("/api/bird/{scientific_name}")
+    def bird_info(scientific_name: str):
+        import httpx
+        key = scientific_name.strip()
+        if key in _wiki_cache:
+            return _wiki_cache[key]
+        info = {"title": key, "extract": "", "thumbnail": None,
+                "url": f"https://en.wikipedia.org/wiki/{key.replace(' ', '_')}"}
+        try:
+            r = httpx.get(
+                "https://en.wikipedia.org/api/rest_v1/page/summary/"
+                + key.replace(" ", "_"),
+                headers={"User-Agent": "birdframe/1.0 (bird dashboard)"},
+                timeout=6, follow_redirects=True)
+            if r.status_code == 200:
+                d = r.json()
+                info["title"] = d.get("title", key)
+                info["extract"] = d.get("extract", "")
+                info["url"] = d.get("content_urls", {}).get("desktop", {}).get("page", info["url"])
+                thumb = d.get("thumbnail", {})
+                info["thumbnail"] = thumb.get("source")
+        except Exception:
+            pass
+        _wiki_cache[key] = info
+        return info
+
     def _conf_floor() -> float:
         return float(getattr(ctx.config, "min_species_confidence", 0.0) or 0.0)
 
@@ -115,7 +177,7 @@ def create_app(ctx: AppContext) -> FastAPI:
         species = ctx.store.species_in_window(now - timedelta(minutes=window_min), now,
                                               min_confidence=_conf_floor())
         rec = ctx.artist.generate(now, force_paid=True, species_days=species)
-        result = _publish(ctx, rec)
+        result = _publish(ctx, rec, force=True)
         return {"image_id": rec.id, "species": rec.species,
                 "window_minutes": window_min,
                 "publish": result.status, "detail": result.detail}
@@ -139,9 +201,9 @@ def create_app(ctx: AppContext) -> FastAPI:
 
     @app.post("/api/post-now")
     def post_now():
-        # Explicit user action → force a real (paid) image if a key is set.
+        # Explicit user action → force a real (paid) image and override any hold.
         rec = ctx.artist.generate(ctx.now(), force_paid=True)
-        result = _publish(ctx, rec)
+        result = _publish(ctx, rec, force=True)
         return {"image_id": rec.id, "publish": result.status, "detail": result.detail}
 
     @app.post("/api/repost/{image_id}")
@@ -149,7 +211,7 @@ def create_app(ctx: AppContext) -> FastAPI:
         rec = ctx.store.get_image(image_id)
         if rec is None:
             return JSONResponse({"error": "no such image"}, status_code=404)
-        result = _publish(ctx, rec)
+        result = _publish(ctx, rec, force=True)
         return {"image_id": rec.id, "publish": result.status, "detail": result.detail}
 
     # ---- Styles editor ----
@@ -325,9 +387,9 @@ def create_app(ctx: AppContext) -> FastAPI:
     return app
 
 
-def _publish(ctx: AppContext, rec):
+def _publish(ctx: AppContext, rec, force: bool = False):
     with open(rec.path, "rb") as fh:
-        result = ctx.publisher.publish(fh.read())
+        result = ctx.publisher.publish(fh.read(), force=force)
     if result.status == "posted":
         ctx.store.mark_posted(rec.id, ctx.now())
     return result

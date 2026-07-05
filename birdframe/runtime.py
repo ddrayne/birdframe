@@ -75,7 +75,8 @@ class Runtime:
         when = when or self.now()
         rec = self.artist.generate(when, force_paid=force_paid)
         with open(rec.path, "rb") as fh:
-            result = self.publisher.publish(fh.read())
+            # An explicit user post (force_paid) also overrides any frame hold.
+            result = self.publisher.publish(fh.read(), force=force_paid)
         if result.status == "posted":
             self.store.mark_posted(rec.id, when)
         self.last_post = when

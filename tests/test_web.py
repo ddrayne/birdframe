@@ -50,9 +50,11 @@ class FakePublishResult:
 class FakePublisher:
     def __init__(self):
         self.published = []
+        self.forced = []
 
-    def publish(self, png):
+    def publish(self, png, force=False):
         self.published.append(png)
+        self.forced.append(force)
         return FakePublishResult()
 
 
@@ -89,6 +91,7 @@ def test_post_now_generates_and_publishes(tmp_path):
     assert ctx.artist.calls == 1
     assert ctx.artist.forced == [True]        # dashboard Post Now forces a real image
     assert len(ctx.publisher.published) == 1
+    assert ctx.publisher.forced == [True]     # explicit post overrides any frame hold
     assert resp.json()["publish"] == "posted"
 
 

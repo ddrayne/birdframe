@@ -30,10 +30,13 @@ class Publisher:
         self.backoff = backoff
         self.timeout = timeout
 
-    def publish(self, png_bytes: bytes) -> PublishResult:
+    def publish(self, png_bytes: bytes, force: bool = False) -> PublishResult:
         url = f"{self.frame_url}/display"
         data = {"source": "birdframe", "hold_minutes": self.hold_minutes,
                 "saturation": self.saturation}
+        if force:
+            # Explicit user action → override any hold another source placed.
+            data["force"] = "1"
         last = ""
         for attempt in range(self.max_retries):
             try:

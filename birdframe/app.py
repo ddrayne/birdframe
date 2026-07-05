@@ -40,6 +40,20 @@ def _setup_logging() -> None:
     )
 
 
+def _lan_ip() -> str | None:
+    """Best-effort local network IP for sharing the dashboard on the LAN."""
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("8.8.8.8", 80))  # no packets sent; just picks the route
+            return s.getsockname()[0]
+        finally:
+            s.close()
+    except Exception:
+        return None
+
+
 def _start_caffeinate() -> None:
     """Keep the Mac awake (idle) while birdframe runs, so it hears the dawn chorus."""
     try:
@@ -134,10 +148,14 @@ def _start_dashboard(runtime: Runtime, config: Config) -> None:
                      styles_dir=DEFAULT_STYLES_DIR,
                      preview_dir=DATA_DIR / "style_previews")
     app = create_app(ctx)
+    # Bind to all interfaces so other devices on the home network can reach it.
     server = uvicorn.Server(uvicorn.Config(
-        app, host="127.0.0.1", port=config.dashboard_port, log_level="warning"))
+        app, host="0.0.0.0", port=config.dashboard_port, log_level="warning"))
     threading.Thread(target=server.run, daemon=True).start()
+    lan_ip = _lan_ip()
     log.info("Dashboard at http://localhost:%d", config.dashboard_port)
+    if lan_ip:
+        log.info("On your network at http://%s:%d", lan_ip, config.dashboard_port)
 
 
 def _set_key_interactive() -> int:
