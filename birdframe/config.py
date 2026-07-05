@@ -26,7 +26,7 @@ DEFAULTS = {
     "frame_saturation": 0.6,
     "style_mode": "rotate",        # rotate | pinned
     "pinned_style": "",
-    "openai_model": "gpt-image-1",
+    "openai_model": "gpt-image-1-mini",  # works without org verification; cheap
     "image_quality": "high",
     "min_species_for_image": 1,    # below this, post the free poster (no paid call)
     "max_paid_images_per_day": 1,  # hard cap on paid gpt-image-1 calls per day
