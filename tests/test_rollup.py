@@ -41,4 +41,7 @@ def test_build_prompt_fills_placeholder_and_appends_avoid():
 
 def test_build_prompt_without_avoid():
     style = Style("plain", "Paint {scene}.", "")
-    assert build_prompt(style, "a wren") == "Paint a wren."
+    prompt = build_prompt(style, "a wren")
+    assert prompt.startswith("Paint a wren.")
+    assert "accurately" in prompt          # plumage-accuracy guidance always appended
+    assert "Avoid:" not in prompt

@@ -48,6 +48,8 @@ class AppContext:
     preview_dir: object = None
     geo_lookup: object = None       # dict {scientific_name: plausibility} for reliability
     runtime: object = None          # live daemon state (health, listening status)
+    text_client: object = None      # OpenAI client for the day-narration (or None)
+    narration_model: str = "gpt-4.1-mini"
 
 
 def _assess_species(ctx, s, day=None):
@@ -155,6 +157,38 @@ def create_app(ctx: AppContext) -> FastAPI:
         assessed = [_assess_species(ctx, s, day) for s in species]
         assessed.sort(key=lambda x: (_TIER_ORDER[x["tier"]], -x["count"]))
         return {"date": day, "species": assessed}
+
+    _narration_cache: dict[str, str] = {}
+
+    @app.get("/api/narration")
+    def narration():
+        from birdframe.narrator import narrate
+        from birdframe.reliability import GEO_DEFAULT, assess, is_reliable
+        from birdframe.rollup import season_for
+        now = ctx.now()
+        day = now.strftime("%Y-%m-%d")
+        species = ctx.store.species_for_day(now, min_confidence=_conf_floor())
+        solid = [s for s in species
+                 if is_reliable(assess(s.best_confidence,
+                                       (ctx.geo_lookup or {}).get(s.scientific_name, GEO_DEFAULT),
+                                       s.count))]
+        names = [s.common_name for s in solid]
+        key = f"{day}:{len(names)}:{names[0] if names else ''}"  # refresh as the day grows
+        if key in _narration_cache:
+            return {"narration": _narration_cache[key], "date": day}
+        h = now.hour
+        tod = ("early morning" if h < 8 else "morning" if h < 12 else
+               "afternoon" if h < 17 else "evening" if h < 21 else "dusk")
+        weather = "changeable"
+        try:
+            weather = ctx.artist.weather_fn(ctx.artist.latitude, ctx.artist.longitude, now)
+        except Exception:
+            pass
+        dawn = min(solid, key=lambda s: s.first_heard).common_name if solid else None
+        text = narrate(names, weather, season_for(now), tod, dawn_bird=dawn,
+                       client=ctx.text_client, model=ctx.narration_model)
+        _narration_cache[key] = text
+        return {"narration": text, "date": day}
 
     @app.get("/api/clip/{day}/{common_name}")
     def clip(day: str, common_name: str):

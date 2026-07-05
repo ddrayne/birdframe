@@ -200,6 +200,8 @@
   .doubtful > summary::before { content:"▸ "; }
   .doubtful[open] > summary::before { content:"▾ "; }
   .doubtful .species { opacity:.72; }
+  .daystory { font-family:var(--serif); font-size:19px; line-height:1.5; color:var(--ink);
+    margin:4px 0 16px; padding-left:14px; border-left:3px solid var(--accent); font-style:italic; }
   .healthgrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px 20px; }
   .healthgrid > div { font-size:14px; }
   .hval { color:var(--muted); float:right; font-family:var(--mono); font-size:13px; }
@@ -307,6 +309,7 @@
       <button class="btn" id="postNow">Make today's picture</button>
       <span class="status" id="status"></span>
     </div>
+    <p id="dayStory" class="daystory" hidden></p>
     <p class="hint" style="margin:0 0 12px">
       Each bird is weighed on how clearly it was heard, how likely it is here, and how often —
       <span class="tier tier-confirmed">confirmed</span>
@@ -538,7 +541,15 @@ function speciesRow(s) {
       <div style="margin-top:4px">${relMeter(s)}</div>
     </div></div>`;
 }
+async function loadStory() {
+  try {
+    const n = await (await fetch('/api/narration')).json();
+    const el = $('#dayStory');
+    if (n.narration) { el.textContent = '“' + n.narration + '”'; el.hidden = false; }
+  } catch {}
+}
 async function loadToday() {
+  loadStory();
   const d = await (await fetch('/api/today')).json();
   if (!d.species.length) { $('#speciesList').innerHTML = '<div class="empty">No birds heard yet today. Listening…</div>'; return; }
   const solid = d.species.filter(s=>s.tier!=='tentative');

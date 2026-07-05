@@ -180,13 +180,22 @@ def _start_dashboard(runtime: Runtime, config: Config) -> None:
 
     from birdframe.styles import DEFAULT_STYLES_DIR
 
+    text_client = None
+    key = secrets.get_openai_key()
+    if key:
+        try:
+            from openai import OpenAI
+            text_client = OpenAI(api_key=key, timeout=30)
+        except Exception:
+            text_client = None
+
     ctx = AppContext(store=runtime.store, artist=runtime.artist,
                      publisher=runtime.publisher, config=config,
                      apply_settings=apply_settings,
                      styles_dir=DEFAULT_STYLES_DIR,
                      preview_dir=DATA_DIR / "style_previews",
                      geo_lookup=getattr(runtime.detector, "geo_by_scientific", {}),
-                     runtime=runtime)
+                     runtime=runtime, text_client=text_client)
     app = create_app(ctx)
     # Bind to all interfaces so other devices on the home network can reach it.
     server = uvicorn.Server(uvicorn.Config(

@@ -52,8 +52,13 @@ def build_scene(species: list[SpeciesDay], first_ever: set[str],
     return "; ".join(parts)
 
 
+ACCURACY = ("Render every bird's plumage, size, beak shape and markings accurately "
+            "and true to the real species, so each is recognisable to a birdwatcher.")
+
+
 def build_prompt(style: Style, scene: str) -> str:
     prompt = style.prompt.replace("{scene}", scene).strip()
+    prompt += f"\n\n{ACCURACY}"
     if style.avoid:
         prompt += f"\n\nAvoid: {style.avoid}"
     return prompt
