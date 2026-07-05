@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable
+from urllib.parse import quote
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -43,22 +44,25 @@ class AppContext:
     styles_dir: object = None
     preview_dir: object = None
     geo_lookup: object = None       # dict {scientific_name: plausibility} for reliability
+    runtime: object = None          # live daemon state (health, listening status)
 
 
-def _assess_species(ctx, s):
+def _assess_species(ctx, s, day=None):
     """Attach a reliability assessment to a SpeciesDay for honest presentation."""
     from birdframe.reliability import GEO_DEFAULT, assess
     geo = GEO_DEFAULT
     if ctx.geo_lookup:
         geo = ctx.geo_lookup.get(s.scientific_name, GEO_DEFAULT)
     a = assess(s.best_confidence, geo, s.count)
+    has_clip = bool(day and ctx.store.clip_path(day, s.common_name))
     return {
         "common_name": s.common_name, "scientific_name": s.scientific_name,
         "count": s.count, "best_confidence": round(s.best_confidence, 2),
         "first_heard": s.first_heard.strftime("%H:%M"),
         "last_heard": s.last_heard.strftime("%H:%M"), "peak_hour": s.peak_hour,
         "tier": a.tier, "reliability": a.score, "reasons": a.reasons,
-        "geo": round(geo, 3),
+        "geo": round(geo, 3), "has_clip": has_clip,
+        "clip_url": f"/api/clip/{day}/{quote(s.common_name)}" if has_clip else None,
     }
 
 
@@ -143,10 +147,18 @@ def create_app(ctx: AppContext) -> FastAPI:
     @app.get("/api/today")
     def today():
         now = ctx.now()
+        day = now.strftime("%Y-%m-%d")
         species = ctx.store.species_for_day(now, min_confidence=_conf_floor())
-        assessed = [_assess_species(ctx, s) for s in species]
+        assessed = [_assess_species(ctx, s, day) for s in species]
         assessed.sort(key=lambda x: (_TIER_ORDER[x["tier"]], -x["count"]))
-        return {"date": now.strftime("%Y-%m-%d"), "species": assessed}
+        return {"date": day, "species": assessed}
+
+    @app.get("/api/clip/{day}/{common_name}")
+    def clip(day: str, common_name: str):
+        path = ctx.store.clip_path(day, common_name)
+        if not path or not Path(path).exists():
+            return JSONResponse({"error": "no clip"}, status_code=404)
+        return FileResponse(path, media_type="audio/ogg")
 
     @app.get("/api/now")
     def now_listening():
@@ -161,7 +173,8 @@ def create_app(ctx: AppContext) -> FastAPI:
         today = ctx.store.species_for_day(now, min_confidence=floor)
         first_ever = ctx.store.first_ever_on_day(now)
         latest = recent[0] if recent else None
-        window_assessed = [_assess_species(ctx, s) for s in window]
+        day = now.strftime("%Y-%m-%d")
+        window_assessed = [_assess_species(ctx, s, day) for s in window]
         window_assessed.sort(key=lambda x: (_TIER_ORDER[x["tier"]], -x["count"]))
         # tier of the most-recent bird, from its window/day track record
         latest_tier = None
@@ -182,6 +195,8 @@ def create_app(ctx: AppContext) -> FastAPI:
                 "at": latest.timestamp.strftime("%H:%M:%S"),
                 "seconds_ago": max(0, int((now - latest.timestamp).total_seconds())),
                 "tier": latest_tier,
+                "clip_url": (f"/api/clip/{day}/{quote(latest.common_name)}"
+                             if ctx.store.clip_path(day, latest.common_name) else None),
             },
             "feed": [
                 {"common_name": d.common_name, "scientific_name": d.scientific_name,

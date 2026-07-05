@@ -100,7 +100,23 @@ def build_runtime(config: Config) -> Runtime:
         saturation=config.frame_saturation,
     )
     return Runtime(config=config, store=store, detector=detector,
-                   artist=artist, publisher=publisher)
+                   artist=artist, publisher=publisher,
+                   clips_dir=DATA_DIR / "clips", on_first_ever=_notify_first_ever)
+
+
+def _notify_first_ever(common_name: str) -> None:
+    """A life-list first — celebrate it with a macOS notification."""
+    _notify("New bird for your window! 🐦", f"First time hearing a {common_name}.")
+
+
+def _notify(title: str, message: str) -> None:
+    try:
+        subprocess.run(
+            ["osascript", "-e",
+             f'display notification {message!r} with title {title!r} sound name "Glass"'],
+            check=False, timeout=5)
+    except Exception as exc:  # notifications are best-effort
+        log.debug("notification failed: %s", exc)
 
 
 def _start_listener(runtime: Runtime, config: Config) -> None:

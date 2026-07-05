@@ -64,6 +64,17 @@ class Store:
                     confidence REAL NOT NULL)"""
             )
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_det_day ON detections(day)")
+            # Best audio clip per species per day (a recording you can listen to).
+            self._conn.execute(
+                """CREATE TABLE IF NOT EXISTS clips (
+                    day TEXT NOT NULL,
+                    common_name TEXT NOT NULL,
+                    scientific_name TEXT NOT NULL,
+                    confidence REAL NOT NULL,
+                    path TEXT NOT NULL,
+                    ts TEXT NOT NULL,
+                    PRIMARY KEY (day, common_name))"""
+            )
             self._conn.execute(
                 """CREATE TABLE IF NOT EXISTS images (
                     id INTEGER PRIMARY KEY,
@@ -162,12 +173,51 @@ class Store:
             buckets[min(n - 1, max(0, idx))] += 1
         return buckets
 
-    def delete_species(self, common_name: str) -> int:
-        """Purge all recorded detections of a species (a vetoed false positive)."""
+    def best_clip_confidence(self, day: str, common_name: str) -> float | None:
+        r = self._conn.execute(
+            "SELECT confidence FROM clips WHERE day = ? AND common_name = ?",
+            (day, common_name),
+        ).fetchone()
+        return r["confidence"] if r else None
+
+    def upsert_clip(self, day, common_name, scientific_name, confidence, path, ts) -> None:
         with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO clips (day, common_name, scientific_name, confidence, path, ts)"
+                " VALUES (?, ?, ?, ?, ?, ?)"
+                " ON CONFLICT(day, common_name) DO UPDATE SET"
+                "   confidence=excluded.confidence, path=excluded.path, ts=excluded.ts,"
+                "   scientific_name=excluded.scientific_name",
+                (day, common_name, scientific_name, confidence, path, ts.strftime(_ISO)),
+            )
+
+    def clip_path(self, day: str, common_name: str) -> str | None:
+        r = self._conn.execute(
+            "SELECT path FROM clips WHERE day = ? AND common_name = ?",
+            (day, common_name),
+        ).fetchone()
+        return r["path"] if r else None
+
+    def species_with_clips(self, day: str) -> set[str]:
+        rows = self._conn.execute(
+            "SELECT common_name FROM clips WHERE day = ?", (day,)
+        ).fetchall()
+        return {r["common_name"] for r in rows}
+
+    def delete_species(self, common_name: str) -> int:
+        """Purge all recorded detections (and clips) of a species (a vetoed false positive)."""
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM clips WHERE common_name = ?", (common_name,))
             cur = self._conn.execute(
                 "DELETE FROM detections WHERE common_name = ?", (common_name,))
             return cur.rowcount
+
+    def first_ever(self, common_name: str) -> bool:
+        """True if this species has never been detected before (a life-list first)."""
+        r = self._conn.execute(
+            "SELECT 1 FROM detections WHERE common_name = ? LIMIT 1", (common_name,)
+        ).fetchone()
+        return r is None
 
     def first_ever_on_day(self, when: datetime) -> set[str]:
         """Species whose earliest-ever detection date is this day."""

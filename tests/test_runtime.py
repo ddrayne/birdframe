@@ -33,6 +33,31 @@ def test_repeated_species_does_not_reflag(tmp_path):
     assert rt.new_species_today is False
 
 
+def test_saves_best_clip_and_notifies_first_ever(tmp_path):
+    import numpy as np
+    store = Store(tmp_path / "db.sqlite")
+
+    class Det:
+        sample_rate = 48000
+
+        def predict_chunk(self, audio, sr, when):
+            return [Detection(when, "Erithacus rubecula", "European Robin", 0.8)]
+
+    firsts = []
+    rt = Runtime.for_test(store=store, detector=Det(), now=lambda: datetime(2026, 7, 5, 6))
+    rt.clips_dir = tmp_path / "clips"
+    rt.on_first_ever = firsts.append
+    audio = np.zeros(48000, dtype=np.float32)
+    rt.on_chunk(audio=audio, when=datetime(2026, 7, 5, 6))
+    # clip written and recorded
+    clip = store.clip_path("2026-07-05", "European Robin")
+    assert clip is not None and (tmp_path / "clips").exists()
+    from pathlib import Path
+    assert Path(clip).exists()
+    assert store.best_clip_confidence("2026-07-05", "European Robin") == 0.8
+    assert firsts == ["European Robin"]      # notified once, first-ever
+
+
 def test_new_species_flag_resets_next_day(tmp_path):
     store = Store(tmp_path / "db.sqlite")
     det = FakeDetector([])

@@ -172,6 +172,12 @@
   .relmeter { display:inline-flex; gap:2px; vertical-align:middle; margin-left:2px; }
   .relmeter i { width:14px; height:5px; border-radius:2px; background:var(--line); }
   .relmeter i.on { background:currentColor; }
+  .playclip { border:1px solid var(--accent); background:none; color:var(--accent);
+    font-size:10px; width:22px; height:22px; border-radius:50%; cursor:pointer; margin-left:8px;
+    vertical-align:middle; padding:0; display:inline-flex; align-items:center; justify-content:center; }
+  .playclip:hover { background:var(--accent-soft); }
+  .playclip.playing { background:var(--accent); color:var(--surface); animation:pulseclip 1s infinite; }
+  @keyframes pulseclip { 0%,100%{transform:scale(1)} 50%{transform:scale(1.12)} }
 
   /* Gallery */
   .gallery { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:14px; }
@@ -340,6 +346,21 @@ const $ = s => document.querySelector(s);
 const esc = s => (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const slugify = s => s.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
 
+// Shared audio player — one clip at a time.
+const player = new Audio();
+let playingBtn = null;
+function playClip(url, btn) {
+  if (playingBtn) playingBtn.classList.remove('playing');
+  if (playingBtn === btn && !player.paused) { player.pause(); playingBtn = null; return; }
+  player.src = url; player.play().catch(()=>{});
+  btn.classList.add('playing'); playingBtn = btn;
+}
+player.onended = () => { if (playingBtn) playingBtn.classList.remove('playing'); playingBtn = null; };
+function clipBtn(url) {
+  return url ? `<button class="playclip" title="Hear this recording"
+    onclick="event.stopPropagation();playClip('${url}', this)">▶</button>` : '';
+}
+
 // Animated "listening" equaliser — five bars breathing like a live meter.
 const eq = () => '<span class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>';
 
@@ -386,7 +407,7 @@ async function loadNow() {
     (d.latest ? `<span>latest <b>${esc(d.latest.common_name)}</b></span>` : '');
   $('#hero').innerHTML = d.latest ? `
     <div class="eyebrow">${eq()} Most recent bird</div>
-    <div class="bird">${birdLink(d.latest.common_name, d.latest.scientific_name)}</div>
+    <div class="bird">${birdLink(d.latest.common_name, d.latest.scientific_name)} ${clipBtn(d.latest.clip_url)}</div>
     <div class="sci">${esc(d.latest.scientific_name)}</div>
     <div class="meta"><span>heard <b>${d.latest.seconds_ago<90?d.latest.seconds_ago+'s ago':'at '+d.latest.at}</b></span>
       <span>confidence <b>${d.latest.confidence}</b></span>
@@ -404,7 +425,7 @@ async function loadNow() {
       <span class="t">${f.at}</span></div>`).join('') : '<div class="empty">Nothing heard just yet.</div>';
   lastTop = top;
   $('#windowSpecies').innerHTML = d.window_species.length ? d.window_species.map(s=>`
-    <div class="row"><span>${birdLink(s.common_name, s.scientific_name||'')}
+    <div class="row"><span>${birdLink(s.common_name, s.scientific_name||'')} ${clipBtn(s.clip_url)}
       ${s.tier==='tentative' ? '<span class="tier tier-tentative">?</span>' : ''}</span>
       <span class="t">×${s.count} · ${s.best_confidence}</span></div>`).join('')
     : '<div class="empty">Quiet this last hour.</div>';
@@ -456,7 +477,7 @@ async function loadToday() {
   $('#speciesList').innerHTML = d.species.length ? d.species.map(s=>`
     <div class="species ${s.tier}">
       <div>
-        <div class="name">${birdLink(s.common_name, s.scientific_name)} ${tierChip(s)}
+        <div class="name">${birdLink(s.common_name, s.scientific_name)} ${clipBtn(s.clip_url)} ${tierChip(s)}
           <button class="nothere" title="Not here — stop detecting this & remove its history"
             onclick="blockSpecies('${esc(s.common_name).replace(/'/g,"\\'")}')">not here</button></div>
         <div class="sci">${esc(s.scientific_name)}</div>

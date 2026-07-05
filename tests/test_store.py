@@ -42,6 +42,24 @@ def test_min_confidence_filters_false_positives(tmp_path):
     assert all(d.common_name == "European Robin" for d in feed)
 
 
+def test_clip_upsert_keeps_best_and_serves_path(tmp_path):
+    s = Store(tmp_path / "db.sqlite")
+    assert s.best_clip_confidence("2026-07-05", "European Robin") is None
+    s.upsert_clip("2026-07-05", "European Robin", "Erithacus rubecula", 0.7, "/a.ogg", _dt(6))
+    assert s.best_clip_confidence("2026-07-05", "European Robin") == 0.7
+    s.upsert_clip("2026-07-05", "European Robin", "Erithacus rubecula", 0.9, "/b.ogg", _dt(7))
+    assert s.best_clip_confidence("2026-07-05", "European Robin") == 0.9
+    assert s.clip_path("2026-07-05", "European Robin") == "/b.ogg"   # upgraded to the better clip
+    assert s.species_with_clips("2026-07-05") == {"European Robin"}
+
+
+def test_first_ever_flag(tmp_path):
+    s = Store(tmp_path / "db.sqlite")
+    assert s.first_ever("European Robin") is True
+    s.add_detection(Detection(_dt(6), "Erithacus rubecula", "European Robin", 0.9))
+    assert s.first_ever("European Robin") is False
+
+
 def test_recent_detections_newest_first(tmp_path):
     s = Store(tmp_path / "db.sqlite")
     s.add_detection(Detection(_dt(5), "Erithacus rubecula", "European Robin", 0.9))
