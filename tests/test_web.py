@@ -1,3 +1,4 @@
+import time
 from datetime import datetime
 
 from fastapi.testclient import TestClient
@@ -225,6 +226,12 @@ def test_preview_generates_and_serves_image(tmp_path):
     _, ctx, client = _client(tmp_path, image_client=fake_client)
     resp = client.post("/api/styles/ukiyo-e/preview")
     assert resp.status_code == 200
+    assert resp.json()["status"] == "started"
+    # generation runs in a background thread; wait for it to finish
+    for _ in range(50):
+        if client.get("/api/styles/ukiyo-e/preview-status").json()["status"] == "ready":
+            break
+        time.sleep(0.02)
     assert "woodblock" in fake_client.prompts[0].lower()   # used the style's prompt
     img = client.get("/api/styles/ukiyo-e/preview.png")
     assert img.status_code == 200

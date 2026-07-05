@@ -147,8 +147,13 @@ def create_app(ctx: AppContext) -> FastAPI:
         return {"image_id": rec.id, "publish": result.status, "detail": result.detail}
 
     # ---- Styles editor ----
+    import threading
+
     from birdframe import styles as stylemod
     from birdframe.rollup import build_prompt
+
+    _preview_jobs: dict[str, str] = {}
+    _preview_lock = threading.Lock()
 
     def _reload_styles():
         if ctx.styles_dir and hasattr(ctx.artist, "styles"):
@@ -227,16 +232,43 @@ def create_app(ctx: AppContext) -> FastAPI:
             return JSONResponse(
                 {"error": "set an OpenAI key (birdframe set-key) to generate previews"},
                 status_code=400)
+        slug = style.name
+        with _preview_lock:
+            if slug in _preview_jobs:
+                return {"status": "generating", "name": slug}
+            _preview_jobs[slug] = "generating"
+
         prompt = build_prompt(style, stylemod.SAMPLE_SCENE)
-        try:
-            art = client.generate(prompt)
-        except Exception as exc:
-            return JSONResponse({"error": f"image generation failed: {exc}"},
-                                status_code=502)
-        pp = _preview_path(style.name)
-        pp.parent.mkdir(parents=True, exist_ok=True)
-        pp.write_bytes(art)
-        return {"ok": True, "name": style.name}
+
+        def _run():
+            try:
+                art = client.generate(prompt)
+                pp = _preview_path(slug)
+                pp.parent.mkdir(parents=True, exist_ok=True)
+                pp.write_bytes(art)
+                with _preview_lock:
+                    _preview_jobs[slug] = "done"
+            except Exception as exc:  # noqa: BLE001
+                with _preview_lock:
+                    _preview_jobs[slug] = f"error: {exc}"
+
+        # gpt-image generation takes ~2 min — never block the request on it.
+        threading.Thread(target=_run, daemon=True).start()
+        return {"status": "started", "name": slug}
+
+    @app.get("/api/styles/{name}/preview-status")
+    def preview_status(name: str):
+        slug = stylemod.slugify(name)
+        pp = _preview_path(slug)
+        with _preview_lock:
+            state = _preview_jobs.get(slug)
+        if pp and pp.exists() and state != "generating":
+            return {"status": "ready"}
+        if state == "generating":
+            return {"status": "generating"}
+        if state and state.startswith("error"):
+            return {"status": "error", "detail": state}
+        return {"status": "none"}
 
     @app.get("/api/styles/{name}/preview.png")
     def get_preview(name: str):

@@ -413,17 +413,30 @@ async function previewStyle() {
   const prompt = $('#stylePrompt').value;
   if (!prompt.includes('{scene}')) { $('#styleStatus').textContent = 'Prompt must contain {scene}.'; return; }
   $('#previewStyle').disabled = true;
-  $('#styleStatus').textContent = 'Painting an example (this costs one image)…';
+  $('#styleStatus').textContent = 'Painting an example (gpt-image takes ~2 min, this costs one image)…';
   await fetch('/api/styles/' + encodeURIComponent(name), {method:'PUT',
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({name, prompt, avoid: $('#styleAvoid').value})});
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
   const r = await fetch('/api/styles/' + slug + '/preview', {method:'POST'});
   const res = await r.json();
-  $('#previewStyle').disabled = false;
-  if (!r.ok) { $('#styleStatus').textContent = 'Error: ' + res.error; return; }
-  $('#styleStatus').textContent = 'Example ready.';
-  $('#editorPreview').innerHTML = `<img src="/api/styles/${slug}/preview.png?t=${Date.now()}" alt="example">`;
+  if (!r.ok) { $('#previewStyle').disabled = false; $('#styleStatus').textContent = 'Error: ' + res.error; return; }
+  // Poll until the background generation writes the image.
+  const started = Date.now();
+  const poll = setInterval(async () => {
+    const st = await (await fetch('/api/styles/' + slug + '/preview-status')).json();
+    const secs = Math.round((Date.now()-started)/1000);
+    if (st.status === 'ready') {
+      clearInterval(poll); $('#previewStyle').disabled = false;
+      $('#styleStatus').textContent = 'Example ready.';
+      $('#editorPreview').innerHTML = `<img src="/api/styles/${slug}/preview.png?t=${Date.now()}" alt="example">`;
+    } else if (st.status === 'error') {
+      clearInterval(poll); $('#previewStyle').disabled = false;
+      $('#styleStatus').textContent = 'Error: ' + (st.detail || 'generation failed');
+    } else {
+      $('#styleStatus').textContent = `Painting an example… ${secs}s`;
+    }
+  }, 3000);
 }
 
 async function pinStyle(name){ await fetch('/api/styles/'+name+'/pin', {method:'POST'}); loadStyles(); }
