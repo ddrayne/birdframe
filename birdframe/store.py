@@ -249,6 +249,10 @@ class Store:
             "SELECT ts, common_name, scientific_name, confidence FROM detections ORDER BY ts"
         ).fetchall()
 
+    def last_detection_time(self) -> datetime | None:
+        r = self._conn.execute("SELECT MAX(ts) AS ts FROM detections").fetchone()
+        return datetime.strptime(r["ts"], _ISO) if r and r["ts"] else None
+
     def first_ever(self, common_name: str) -> bool:
         """True if this species has never been detected before (a life-list first)."""
         r = self._conn.execute(

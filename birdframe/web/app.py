@@ -316,7 +316,7 @@ def create_app(ctx: AppContext) -> FastAPI:
         return {
             "listening": listening == "listening",
             "status": listening,
-            "last_detection_ago_s": _ago(getattr(rt, "last_detection_at", None)),
+            "last_detection_ago_s": _ago(ctx.store.last_detection_time()),
             "last_post_ago_s": _ago(getattr(rt, "last_post", None)),
             "species_today": len(ctx.store.species_for_day(now)),
             "whitelist_size": len(getattr(getattr(rt, "detector", None), "whitelist", []) or []),
