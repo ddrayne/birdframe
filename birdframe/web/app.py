@@ -45,7 +45,11 @@ class AppContext:
 
 
 def create_app(ctx: AppContext) -> FastAPI:
+    import threading as _threading
     app = FastAPI(title="birdframe")
+
+    _capture = {"state": "idle", "cancel": False, "result": None,
+                "species": [], "lock": _threading.Lock()}
 
     @app.get("/")
     def index():
@@ -172,17 +176,83 @@ def create_app(ctx: AppContext) -> FastAPI:
 
     @app.post("/api/capture")
     def capture():
-        """Capture the birds heard in the recent live window into a picture
-        (an explicit action → forces a real image if a key is set)."""
+        """Capture the birds heard in the recent live window into a picture, in
+        the background (gpt-image takes ~2 min). Cancellable via /api/capture/cancel."""
+        import threading
+        with _capture["lock"]:
+            if _capture["state"] == "running":
+                return {"status": "running"}
+            _capture.update(state="running", cancel=False, result=None, species=[])
+
         now = ctx.now()
         window_min = getattr(ctx.config, "capture_window_minutes", 60)
         species = ctx.store.species_in_window(now - timedelta(minutes=window_min), now,
                                               min_confidence=_conf_floor())
-        rec = ctx.artist.generate(now, force_paid=True, species_days=species)
-        result = _publish(ctx, rec, force=True)
-        return {"image_id": rec.id, "species": rec.species,
-                "window_minutes": window_min,
-                "publish": result.status, "detail": result.detail}
+
+        def _run():
+            try:
+                rec = ctx.artist.generate(now, force_paid=True, species_days=species)
+                with _capture["lock"]:
+                    if _capture["cancel"]:
+                        _capture.update(state="cancelled", species=rec.species)
+                        return
+                result = _publish(ctx, rec, force=True)
+                with _capture["lock"]:
+                    _capture.update(state="done", result=result.status, species=rec.species)
+            except Exception as exc:  # noqa: BLE001
+                with _capture["lock"]:
+                    _capture.update(state="error", result=str(exc))
+
+        threading.Thread(target=_run, daemon=True).start()
+        return {"status": "started", "window_minutes": window_min,
+                "species": [s.common_name for s in species]}
+
+    @app.post("/api/capture/cancel")
+    def capture_cancel():
+        """Stop the current capture — the image won't be sent to the frame."""
+        with _capture["lock"]:
+            if _capture["state"] == "running":
+                _capture["cancel"] = True
+                return {"status": "cancelling"}
+            return {"status": _capture["state"]}
+
+    @app.get("/api/capture/status")
+    def capture_status():
+        with _capture["lock"]:
+            return {"state": _capture["state"], "result": _capture["result"],
+                    "species": _capture["species"]}
+
+    @app.post("/api/block")
+    async def block_species(request: Request):
+        """Veto a species as 'not here': stop detecting it and purge its history."""
+        body = await request.json()
+        name = (body.get("name") or "").strip()
+        if not name:
+            return JSONResponse({"error": "name required"}, status_code=400)
+        blocked = list(getattr(ctx.config, "blocked_species", []) or [])
+        if name not in blocked:
+            blocked.append(name)
+        ctx.config.blocked_species = blocked
+        ctx.config.save()
+        if ctx.apply_settings:
+            ctx.apply_settings()
+        removed = ctx.store.delete_species(name)
+        return {"blocked": name, "removed_detections": removed}
+
+    @app.post("/api/unblock")
+    async def unblock_species(request: Request):
+        body = await request.json()
+        name = (body.get("name") or "").strip()
+        blocked = [b for b in (getattr(ctx.config, "blocked_species", []) or []) if b != name]
+        ctx.config.blocked_species = blocked
+        ctx.config.save()
+        if ctx.apply_settings:
+            ctx.apply_settings()
+        return {"blocked_species": blocked}
+
+    @app.get("/api/blocked")
+    def blocked_species():
+        return {"blocked_species": list(getattr(ctx.config, "blocked_species", []) or [])}
 
     @app.get("/api/history")
     def history():

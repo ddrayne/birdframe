@@ -56,6 +56,14 @@
   @keyframes pulse { 0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--live) 55%,transparent);}
     70%{box-shadow:0 0 0 7px transparent;} 100%{box-shadow:0 0 0 0 transparent;} }
   @media (prefers-reduced-motion: reduce){ .livedot{animation:none;} }
+  .eq { display:inline-flex; align-items:flex-end; gap:2px; height:13px; vertical-align:middle; }
+  .eq i { width:3px; background:var(--live); border-radius:2px; height:40%;
+    animation:eq 1s ease-in-out infinite; }
+  .eq i:nth-child(2){ animation-delay:.15s } .eq i:nth-child(3){ animation-delay:.3s }
+  .eq i:nth-child(4){ animation-delay:.45s } .eq i:nth-child(5){ animation-delay:.6s }
+  @keyframes eq { 0%,100%{height:30%} 50%{height:100%} }
+  @media (prefers-reduced-motion: reduce){ .eq i{animation:none; height:60%;} }
+  .btn.stopping { background:var(--bad); }
 
   nav { display:flex; gap:4px; justify-content:center; flex-wrap:nowrap; overflow-x:auto;
     margin:18px auto 0; padding:5px; max-width:max-content; background:var(--surface-2);
@@ -143,6 +151,10 @@
   .species { display:flex; justify-content:space-between; align-items:center; gap:12px; }
   .species .name { font-size:17px; }
   .species .sci { font-style:italic; color:var(--muted); font-size:13px; }
+  .nothere { border:1px solid var(--line); background:none; color:var(--muted);
+    font:inherit; font-size:11px; padding:1px 8px; border-radius:999px; cursor:pointer;
+    margin-left:8px; vertical-align:middle; }
+  .nothere:hover { border-color:var(--bad); color:var(--bad); }
 
   /* Gallery */
   .gallery { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:14px; }
@@ -274,6 +286,9 @@ const $ = s => document.querySelector(s);
 const esc = s => (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const slugify = s => s.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
 
+// Animated "listening" equaliser — five bars breathing like a live meter.
+const eq = () => '<span class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>';
+
 // Live activity sparkline (detections over the window) as an inline SVG area.
 function sparkline(data) {
   if (!data || !data.length || !data.some(v=>v>0)) return '';
@@ -316,13 +331,13 @@ async function loadNow() {
      <span><b>${d.today_species_count}</b> species today</span>` +
     (d.latest ? `<span>latest <b>${esc(d.latest.common_name)}</b></span>` : '');
   $('#hero').innerHTML = d.latest ? `
-    <div class="eyebrow"><span class="livedot"></span> Most recent bird</div>
+    <div class="eyebrow">${eq()} Most recent bird</div>
     <div class="bird">${birdLink(d.latest.common_name, d.latest.scientific_name)}</div>
     <div class="sci">${esc(d.latest.scientific_name)}</div>
     <div class="meta"><span>heard <b>${d.latest.seconds_ago<90?d.latest.seconds_ago+'s ago':'at '+d.latest.at}</b></span>
       <span>confidence <b>${d.latest.confidence}</b></span></div>
     ${sparkline(d.activity)}`
-    : `<div class="eyebrow"><span class="livedot"></span> Listening</div>
+    : `<div class="eyebrow">${eq()} Listening</div>
        <div class="meta" style="margin-top:14px">The mic is open and waiting for the next song.</div>
        ${sparkline(d.activity)}`;
   const top = d.feed[0] ? d.feed[0].at+d.feed[0].common_name : null;
@@ -340,15 +355,32 @@ async function loadNow() {
     ? d.new_today.map(n=>`<span class="chip">${esc(n)}</span>`).join('')
     : '<span class="empty">None yet today.</span>';
 }
+let capturePoll = null, captureStart = 0;
 async function capture() {
-  const b = $('#captureBtn'); b.disabled = true;
-  $('#captureStatus').textContent = 'Capturing the current soundscape…';
-  try {
-    const r = await (await fetch('/api/capture',{method:'POST'})).json();
-    const birds = r.species.length ? r.species.join(', ') : 'a quiet moment';
-    $('#captureStatus').textContent = `Captured ${birds} — frame: ${r.publish}.`;
-  } catch(e){ $('#captureStatus').textContent = 'Error: '+e; }
-  b.disabled = false;
+  const b = $('#captureBtn');
+  if (b.dataset.state === 'running') { // acts as a Stop button while running
+    await fetch('/api/capture/cancel', {method:'POST'});
+    $('#captureStatus').textContent = 'Stopping…';
+    return;
+  }
+  const r = await (await fetch('/api/capture',{method:'POST'})).json();
+  const birds = (r.species||[]).length ? r.species.join(', ') : 'a quiet moment';
+  b.dataset.state = 'running'; b.textContent = 'Stop'; b.classList.add('stopping');
+  captureStart = Date.now();
+  $('#captureStatus').innerHTML = `<span class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span> Painting ${esc(birds)}…`;
+  capturePoll = setInterval(async () => {
+    const st = await (await fetch('/api/capture/status')).json();
+    const secs = Math.round((Date.now()-captureStart)/1000);
+    if (st.state === 'running') {
+      $('#captureStatus').innerHTML = `<span class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span> Painting ${esc(birds)}… ${secs}s`;
+      return;
+    }
+    clearInterval(capturePoll);
+    b.dataset.state = ''; b.textContent = "Capture what's heard now"; b.classList.remove('stopping');
+    if (st.state === 'done') $('#captureStatus').textContent = `Captured ${esc((st.species||[]).join(', ')||'a quiet moment')} — frame: ${st.result}.`;
+    else if (st.state === 'cancelled') $('#captureStatus').textContent = 'Capture stopped — nothing sent to the frame.';
+    else $('#captureStatus').textContent = 'Error: ' + (st.result||'capture failed');
+  }, 2000);
 }
 
 // ---- Today ----
@@ -356,11 +388,18 @@ async function loadToday() {
   const d = await (await fetch('/api/today')).json();
   $('#speciesList').innerHTML = d.species.length ? d.species.map(s=>`
     <div class="species">
-      <div><div class="name">${birdLink(s.common_name, s.scientific_name)}</div>
-        <div class="sci">${esc(s.scientific_name)}</div></div>
+      <div><div class="name">${birdLink(s.common_name, s.scientific_name)}
+        <button class="nothere" title="Not here — stop detecting this & remove its history"
+          onclick="blockSpecies('${esc(s.common_name).replace(/'/g,"\\'")}')">not here</button></div>
+        <div class="sci">${esc(s.scientific_name)} · best ${s.best_confidence}</div></div>
       <div style="text-align:right"><div class="count">${s.count}</div>
         <div class="t" style="color:var(--muted)">${s.first_heard}–${s.last_heard}</div></div>
     </div>`).join('') : '<div class="empty">No birds heard yet today. Listening…</div>';
+}
+async function blockSpecies(name) {
+  if (!confirm(`Mark “${name}” as not here?\nbirdframe will stop detecting it and remove its past detections.`)) return;
+  await fetch('/api/block', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})});
+  loadToday(); if (activeTab==='now') loadNow();
 }
 async function postNow() {
   const b = $('#postNow'); b.disabled = true; $('#status').textContent = 'Painting today’s birds…';

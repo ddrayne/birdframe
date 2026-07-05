@@ -13,7 +13,8 @@ DEFAULTS = {
     "longitude": -3.19,
     "input_device": "",            # "" = system default input
     "confidence_threshold": 0.55,
-    "geo_floor": 0.03,
+    "geo_floor": 0.05,             # drop regionally-implausible species from the whitelist
+    "blocked_species": [],         # common names you've vetoed as "not here"
     "chunk_seconds": 15.0,
     "chunk_overlap_seconds": 1.5,
     "post_mode": "daily",          # daily | live | manual
@@ -43,6 +44,7 @@ class Config:
     input_device: str
     confidence_threshold: float
     geo_floor: float
+    blocked_species: list
     chunk_seconds: float
     chunk_overlap_seconds: float
     post_mode: str

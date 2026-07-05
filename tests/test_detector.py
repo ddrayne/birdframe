@@ -30,9 +30,21 @@ def test_filter_detections_applies_confidence_and_whitelist():
     assert dets[0].timestamp == when
 
 
+def test_blocklist_vetoes_species():
+    raw = [
+        ("Erithacus rubecula_European Robin", 0.9),
+        ("Podiceps cristatus_Great Crested Grebe", 0.87),   # confident but vetoed
+    ]
+    whitelist = {"Erithacus rubecula_European Robin", "Podiceps cristatus_Great Crested Grebe"}
+    dets = filter_detections(raw, whitelist, threshold=0.5, when=datetime(2026, 7, 5, 6),
+                             blocklist={"Great Crested Grebe"})
+    assert [d.common_name for d in dets] == ["European Robin"]
+
+
 def test_predict_chunk_uses_model(mocker):
     det = Detector.__new__(Detector)          # bypass __init__ (no real model)
     det.threshold = 0.55
+    det.blocklist = set()
     det.whitelist = {"Erithacus rubecula_European Robin"}
     fake_result = mocker.Mock()
     fake_result.to_structured_array.return_value = [

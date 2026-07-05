@@ -23,7 +23,8 @@ def week_of_year(when: datetime) -> int:
     return min(48, (when.month - 1) * 4 + min(3, (when.day - 1) // 7) + 1)
 
 
-def filter_detections(raw, whitelist, threshold, when) -> list[Detection]:
+def filter_detections(raw, whitelist, threshold, when, blocklist=None) -> list[Detection]:
+    blocklist = blocklist or set()
     out: list[Detection] = []
     for name, confidence in raw:
         if confidence < threshold:
@@ -31,6 +32,8 @@ def filter_detections(raw, whitelist, threshold, when) -> list[Detection]:
         if whitelist and name not in whitelist:
             continue
         sci, common = parse_species_name(name)
+        if common in blocklist:      # species the user vetoed as "not here"
+            continue
         out.append(Detection(when, sci, common, float(confidence)))
     return out
 
@@ -65,9 +68,11 @@ def _rows_to_pairs(result) -> list[tuple[str, float]]:
 
 class Detector:
     def __init__(self, latitude: float, longitude: float, threshold: float,
-                 geo_floor: float, when: datetime | None = None):
+                 geo_floor: float, when: datetime | None = None,
+                 blocklist=None):
         import birdnet
         self.threshold = threshold
+        self.blocklist = set(blocklist or ())
         self._acoustic = birdnet.load("acoustic", "2.4", "tf")
         self._geo = birdnet.load("geo", "2.4", "tf")
         self.sample_rate = self._acoustic.get_sample_rate()
@@ -93,4 +98,5 @@ class Detector:
             top_k=5,
         )
         raw = self._extract(result)
-        return filter_detections(raw, self.whitelist, self.threshold, when)
+        return filter_detections(raw, self.whitelist, self.threshold, when,
+                                 blocklist=self.blocklist)

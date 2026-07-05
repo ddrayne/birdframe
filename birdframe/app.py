@@ -71,7 +71,7 @@ def build_runtime(config: Config) -> Runtime:
     detector = Detector(
         latitude=config.latitude, longitude=config.longitude,
         threshold=config.confidence_threshold, geo_floor=config.geo_floor,
-        when=datetime.now(),
+        when=datetime.now(), blocklist=config.blocked_species,
     )
     log.info("Whitelist: %d plausible local species", len(detector.whitelist))
 
@@ -131,6 +131,7 @@ def _start_dashboard(runtime: Runtime, config: Config) -> None:
         scheduler reads runtime.config each tick, so mode/time/live-window apply
         automatically; the artist and publisher hold their own copies."""
         runtime.config = config
+        runtime.detector.blocklist = set(config.blocked_species or ())
         runtime.artist.min_species_for_image = config.min_species_for_image
         runtime.artist.max_paid_images_per_day = config.max_paid_images_per_day
         runtime.artist.min_species_confidence = config.min_species_confidence

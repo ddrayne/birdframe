@@ -162,6 +162,13 @@ class Store:
             buckets[min(n - 1, max(0, idx))] += 1
         return buckets
 
+    def delete_species(self, common_name: str) -> int:
+        """Purge all recorded detections of a species (a vetoed false positive)."""
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "DELETE FROM detections WHERE common_name = ?", (common_name,))
+            return cur.rowcount
+
     def first_ever_on_day(self, when: datetime) -> set[str]:
         """Species whose earliest-ever detection date is this day."""
         day = when.strftime("%Y-%m-%d")

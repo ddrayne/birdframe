@@ -133,10 +133,18 @@ def test_capture_uses_window_species_and_forces_paid(tmp_path):
     resp = client.post("/api/capture")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["publish"] == "posted"
-    assert ctx.artist.forced[-1] is True                    # explicit action forces a real image
+    assert body["status"] == "started"
     assert "Common Blackbird" in body["species"]            # window species used
-    assert "European Robin" not in body["species"]          # the 06:00 robin is outside the 60-min window
+    assert "European Robin" not in body["species"]          # 06:00 robin outside the 60-min window
+    # background job runs; wait for completion
+    for _ in range(50):
+        st = client.get("/api/capture/status").json()
+        if st["state"] == "done":
+            break
+        time.sleep(0.02)
+    assert st["state"] == "done"
+    assert ctx.artist.forced[-1] is True                    # explicit action forced a real image
+    assert ctx.publisher.forced[-1] is True                 # and overrode any frame hold
 
 
 def test_get_settings_returns_grouped_values(tmp_path):
@@ -242,3 +250,20 @@ def test_preview_generates_and_serves_image(tmp_path):
     img = client.get("/api/styles/ukiyo-e/preview.png")
     assert img.status_code == 200
     assert img.content == b"PREVIEWPNG"
+
+
+def test_block_species_removes_and_persists(tmp_path):
+    from datetime import datetime as _dt
+    store, ctx, client = _client(tmp_path)
+    store.add_detection(Detection(_dt(2026, 7, 5, 7), "Podiceps cristatus", "Great Crested Grebe", 0.86))
+    resp = client.post("/api/block", json={"name": "Great Crested Grebe"})
+    assert resp.status_code == 200
+    assert resp.json()["removed_detections"] == 1
+    assert "Great Crested Grebe" in ctx.config.blocked_species
+    # purged from the data
+    assert all(s.common_name != "Great Crested Grebe"
+               for s in store.species_for_day(_dt(2026, 7, 5, 12)))
+    # persisted + unblock works
+    assert "Great Crested Grebe" in Config.load(ctx.config.path).blocked_species
+    client.post("/api/unblock", json={"name": "Great Crested Grebe"})
+    assert ctx.config.blocked_species == []
