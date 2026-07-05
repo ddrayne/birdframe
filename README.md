@@ -32,12 +32,27 @@ design and implementation plan.
 brew install uv libsndfile
 uv sync --extra dev
 
-# Store your OpenAI key in the macOS Keychain (never written to disk):
-uv run python -c "from birdframe import secrets; secrets.set_openai_key('sk-...')"
+# Store your OpenAI key (prompts with hidden input; saved to the macOS Keychain,
+# never written to disk or shell history):
+uv run birdframe set-key
 
 # Run once in the foreground to grant microphone access and watch it work:
 uv run birdframe
 ```
+
+### Entering your OpenAI API key
+
+The key is read at startup from, in order of precedence:
+
+1. the `OPENAI_API_KEY` environment variable, if set (handy for a one-off run:
+   `OPENAI_API_KEY=sk-... uv run birdframe`); otherwise
+2. the **macOS Keychain**, where `birdframe set-key` stores it.
+
+`birdframe set-key` prompts with hidden input, so the key never lands in your
+shell history or on disk. It is stored under Keychain service `birdframe`,
+account `openai_api_key` (viewable in Keychain Access). It is never written to
+`config.toml` or logged. Without a key, birdframe still runs and posts the
+plain-text **fallback poster** instead of a generated picture.
 
 The dashboard is at http://localhost:8355 (today's birds, gallery, Post now).
 

@@ -19,6 +19,7 @@ uv run pytest tests/test_store.py -v            # one file
 uv run pytest tests/test_scheduler.py::test_daily_fires_once_at_post_time -v   # one test
 BIRDFRAME_SMOKE=1 uv run pytest tests/test_smoke.py -s   # opt-in real-model check (needs tests/fixtures/robin.wav)
 uv run birdframe                    # run the app (menu bar + dashboard); grants mic access on first launch
+uv run birdframe set-key            # store the OpenAI key in the Keychain (hidden prompt)
 bash packaging/install.sh           # install the LaunchAgent to run forever
 ```
 
@@ -33,8 +34,10 @@ There is no separate lint/typecheck step configured; pytest is the gate.
   `birdnet.load(...)`, cached under `~/.cache`. First run is slow; Zenodo
   outages surface as `Failed to download ... Status code: 500` — that's their
   server, not the code.
-- **Secrets never touch disk.** The OpenAI key lives in the macOS Keychain via
-  `birdframe/secrets.py`; config TOML holds everything else.
+- **Secrets never touch disk.** `secrets.get_openai_key()` resolves the OpenAI
+  key from the `OPENAI_API_KEY` env var first, then the macOS Keychain. Users
+  set it with `birdframe set-key` (hidden `getpass` prompt → Keychain). Config
+  TOML holds everything else. Don't add a config field for the key.
 
 ## Architecture
 

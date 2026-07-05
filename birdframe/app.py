@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import sys
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -61,7 +62,7 @@ def build_runtime(config: Config) -> Runtime:
                                          quality=config.image_quality)
     else:
         log.warning("No OpenAI key set — pictures will use the fallback poster. "
-                    "Set one with birdframe.secrets.set_openai_key(...).")
+                    "Set one with: birdframe set-key")
 
     artist = Artist(
         store=store, styles=load_styles(), image_client=image_client,
@@ -110,7 +111,30 @@ def _start_dashboard(runtime: Runtime, config: Config) -> None:
     log.info("Dashboard at http://localhost:%d", config.dashboard_port)
 
 
+def _set_key_interactive() -> int:
+    """`birdframe set-key` — prompt for the OpenAI key without echoing it or
+    leaving it in shell history, then store it in the macOS Keychain."""
+    import getpass
+
+    key = getpass.getpass("OpenAI API key (input hidden): ").strip()
+    if not key:
+        print("No key entered — nothing changed.")
+        return 1
+    secrets.set_openai_key(key)
+    print("Saved to the macOS Keychain. birdframe will use it on next run.")
+    return 0
+
+
 def main() -> None:
+    argv = sys.argv[1:]
+    if argv and argv[0] == "set-key":
+        raise SystemExit(_set_key_interactive())
+    if argv and argv[0] in ("-h", "--help"):
+        print("Usage: birdframe [set-key]\n"
+              "  (no args)  run the listener, menu bar, and dashboard\n"
+              "  set-key    store your OpenAI API key in the macOS Keychain")
+        raise SystemExit(0)
+
     _setup_logging()
     _start_caffeinate()
     config = Config.load()
