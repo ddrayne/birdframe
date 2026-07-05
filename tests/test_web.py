@@ -313,3 +313,11 @@ def test_census_and_export(tmp_path):
     csv = client.get("/api/export.csv")
     assert csv.status_code == 200 and "text/csv" in csv.headers["content-type"]
     assert "Eurasian Blackbird" in csv.text
+
+
+def test_health_endpoint(tmp_path):
+    _, ctx, client = _client(tmp_path)
+    h = client.get("/api/health").json()
+    assert "listening" in h and "openai_key_set" in h
+    assert h["openai_key_set"] is False       # no image client in fixture
+    assert "archive_bytes" in h and "species_today" in h

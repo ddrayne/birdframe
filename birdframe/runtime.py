@@ -15,7 +15,7 @@ log = logging.getLogger("birdframe")
 class Runtime:
     def __init__(self, config, store, detector, artist, publisher,
                  now: Callable[[], datetime] = datetime.now,
-                 clips_dir=None, on_first_ever=None):
+                 clips_dir=None, on_first_ever=None, notify=None):
         self.config = config
         self.store = store
         self.detector = detector
@@ -24,6 +24,7 @@ class Runtime:
         self.now = now
         self.clips_dir = Path(clips_dir) if clips_dir else None
         self.on_first_ever = on_first_ever    # callback(common_name) for notifications
+        self.notify = notify or (lambda title, msg: None)
         self.new_species_today = False
         self.last_post: datetime | None = None
         self.last_detection_at: datetime | None = None
@@ -43,6 +44,7 @@ class Runtime:
         rt.now = now
         rt.clips_dir = None
         rt.on_first_ever = None
+        rt.notify = lambda title, msg: None
         rt.new_species_today = False
         rt.last_post = None
         rt.last_detection_at = None
@@ -122,6 +124,9 @@ class Runtime:
             result = self.publisher.publish(fh.read(), force=force_paid)
         if result.status == "posted":
             self.store.mark_posted(rec.id, when)
+        elif result.status == "unreachable":
+            self.notify("Couldn't reach the frame",
+                        "Today's picture is saved but the Inky Frame didn't answer.")
         self.last_post = when
         self.new_species_today = False
         return result.status

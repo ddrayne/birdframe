@@ -200,6 +200,11 @@
   .doubtful > summary::before { content:"▸ "; }
   .doubtful[open] > summary::before { content:"▾ "; }
   .doubtful .species { opacity:.72; }
+  .healthgrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px 20px; }
+  .healthgrid > div { font-size:14px; }
+  .hval { color:var(--muted); float:right; font-family:var(--mono); font-size:13px; }
+  .hdot { width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:7px; vertical-align:middle; }
+  .hdot.good { background:#2E9E6A; } .hdot.bad { background:var(--bad); }
 
   /* Gallery */
   .gallery { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:14px; }
@@ -359,6 +364,7 @@
   </section>
 
   <section id="settings" hidden>
+    <div class="card" id="healthCard" style="margin-bottom:20px"></div>
     <form id="settingsForm"></form>
     <div class="actionbar" style="justify-content:flex-start; margin-top:8px">
       <button class="btn" id="saveSettings" type="button">Save settings</button>
@@ -711,7 +717,27 @@ async function deleteStyle(n){ const r = await fetch('/api/styles/'+n,{method:'D
 const ENUMS = { post_mode:['daily','live','manual'], style_mode:['rotate','pinned'],
   image_quality:['low','medium','high'],
   openai_model:['gpt-image-2','gpt-image-1.5','gpt-image-1','gpt-image-1-mini','chatgpt-image-latest'] };
+function ago(s) {
+  if (s==null) return 'never';
+  if (s<90) return s+'s ago'; if (s<5400) return Math.round(s/60)+'m ago';
+  if (s<172800) return Math.round(s/3600)+'h ago'; return Math.round(s/86400)+'d ago';
+}
+async function loadHealth() {
+  let h; try { h = await (await fetch('/api/health')).json(); } catch { return; }
+  const dot = ok => `<span class="hdot ${ok?'good':'bad'}"></span>`;
+  const mb = (h.archive_bytes/1048576).toFixed(1);
+  $('#healthCard').innerHTML = `<h3 class="mini">System health</h3>
+    <div class="healthgrid">
+      <div>${dot(h.listening)} Listening <span class="hval">${esc(h.status)}</span></div>
+      <div>${dot(h.last_detection_ago_s!=null && h.last_detection_ago_s<3600)} Last bird <span class="hval">${ago(h.last_detection_ago_s)}</span></div>
+      <div>${dot(h.openai_key_set)} OpenAI key <span class="hval">${h.openai_key_set?'set':'missing'}</span></div>
+      <div>${dot(true)} Last post <span class="hval">${ago(h.last_post_ago_s)}</span></div>
+      <div>${dot(h.whitelist_size>0)} Local species <span class="hval">${h.whitelist_size}</span></div>
+      <div>${dot(true)} Image archive <span class="hval">${mb} MB</span></div>
+    </div>`;
+}
 async function loadSettings() {
+  loadHealth();
   const d = await (await fetch('/api/settings')).json();
   $('#settingsForm').innerHTML = d.groups.map(g=>`
     <div class="setgroup"><h3>${g.group}</h3>

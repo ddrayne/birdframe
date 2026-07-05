@@ -1,0 +1,15 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      - name: Install libsndfile
+        run: brew install libsndfile
+      - name: Sync deps
+        run: uv sync --extra dev --python 3.12
+      - name: Run tests
+        run: uv run pytest -q

@@ -99,9 +99,26 @@ def build_runtime(config: Config) -> Runtime:
         frame_url=config.frame_url, hold_minutes=config.frame_hold_minutes,
         saturation=config.frame_saturation,
     )
+    _prune_archive(DATA_DIR / "images", config)
     return Runtime(config=config, store=store, detector=detector,
                    artist=artist, publisher=publisher,
-                   clips_dir=DATA_DIR / "clips", on_first_ever=_notify_first_ever)
+                   clips_dir=DATA_DIR / "clips", on_first_ever=_notify_first_ever,
+                   notify=_notify)
+
+
+def _prune_archive(images_dir: Path, config) -> None:
+    """Keep the image archive from growing without bound. 0 = keep everything."""
+    keep = getattr(config, "archive_keep_days", 0) or 0
+    if keep <= 0 or not Path(images_dir).exists():
+        return
+    import time
+    cutoff = time.time() - keep * 86400
+    for f in Path(images_dir).glob("*.png"):
+        try:
+            if f.stat().st_mtime < cutoff:
+                f.unlink()
+        except OSError:
+            pass
 
 
 def _notify_first_ever(common_name: str) -> None:
@@ -123,8 +140,11 @@ def _start_listener(runtime: Runtime, config: Config) -> None:
     from birdframe.listener import AudioListener
 
     def on_status(s: str) -> None:
+        was_ok = runtime.status == "listening"
         runtime.status = s
         log.info("listener: %s", s)
+        if s.startswith("audio error") and was_ok:
+            _notify("Microphone problem", "birdframe lost the audio input and is retrying.")
 
     listener = AudioListener(
         sample_rate=runtime.detector.sample_rate,

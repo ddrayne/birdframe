@@ -297,6 +297,34 @@ def create_app(ctx: AppContext) -> FastAPI:
     def blocked_species():
         return {"blocked_species": list(getattr(ctx.config, "blocked_species", []) or [])}
 
+    @app.get("/api/health")
+    def health():
+        rt = ctx.runtime
+        now = ctx.now()
+
+        def _ago(dt):
+            return None if dt is None else int((now - dt).total_seconds())
+
+        def _dir_size(path):
+            p = Path(path)
+            if not p.exists():
+                return 0
+            return sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+
+        listening = getattr(rt, "status", "unknown") if rt else "unknown"
+        archive = ctx.artist.archive_dir if hasattr(ctx.artist, "archive_dir") else None
+        return {
+            "listening": listening == "listening",
+            "status": listening,
+            "last_detection_ago_s": _ago(getattr(rt, "last_detection_at", None)),
+            "last_post_ago_s": _ago(getattr(rt, "last_post", None)),
+            "species_today": len(ctx.store.species_for_day(now)),
+            "whitelist_size": len(getattr(getattr(rt, "detector", None), "whitelist", []) or []),
+            "openai_key_set": getattr(ctx.artist, "image_client", None) is not None,
+            "archive_bytes": _dir_size(archive) if archive else 0,
+            "post_mode": getattr(ctx.config, "post_mode", None),
+        }
+
     @app.get("/api/census")
     def census():
         from birdframe.reliability import GEO_DEFAULT, assess
