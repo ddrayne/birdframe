@@ -267,3 +267,26 @@ def test_block_species_removes_and_persists(tmp_path):
     assert "Great Crested Grebe" in Config.load(ctx.config.path).blocked_species
     client.post("/api/unblock", json={"name": "Great Crested Grebe"})
     assert ctx.config.blocked_species == []
+
+
+def test_today_annotates_reliability_and_sorts_tentative_last(tmp_path):
+    from datetime import datetime as _dt
+    store = Store(tmp_path / "db.sqlite")
+    # a solid blackbird and an implausible, confident "grebe"
+    for h in range(3):
+        store.add_detection(Detection(_dt(2026, 7, 5, 6, h), "Turdus merula", "Eurasian Blackbird", 0.95))
+    store.add_detection(Detection(_dt(2026, 7, 5, 7), "Podiceps cristatus", "Great Crested Grebe", 0.86))
+    ctx = AppContext(store=store, artist=FakeArtist(tmp_path / "i.png"),
+                     publisher=FakePublisher(), now=lambda: _dt(2026, 7, 5, 12),
+                     config=Config.load(tmp_path / "c.toml"),
+                     geo_lookup={"Turdus merula": 0.97, "Podiceps cristatus": 0.048})
+    client = TestClient(create_app(ctx))
+    data = client.get("/api/today").json()
+    names = [s["common_name"] for s in data["species"]]
+    assert names[0] == "Eurasian Blackbird"          # confirmed first
+    assert names[-1] == "Great Crested Grebe"         # tentative last
+    grebe = data["species"][-1]
+    assert grebe["tier"] == "tentative"
+    assert "unusual for this area" in grebe["reasons"]
+    black = data["species"][0]
+    assert black["tier"] == "confirmed"

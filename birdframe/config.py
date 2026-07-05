@@ -13,7 +13,7 @@ DEFAULTS = {
     "longitude": -3.19,
     "input_device": "",            # "" = system default input
     "confidence_threshold": 0.55,
-    "geo_floor": 0.05,             # drop regionally-implausible species from the whitelist
+    "geo_floor": 0.03,             # light sanity gate; marginal species are shown but marked tentative
     "blocked_species": [],         # common names you've vetoed as "not here"
     "chunk_seconds": 15.0,
     "chunk_overlap_seconds": 1.5,
@@ -32,7 +32,7 @@ DEFAULTS = {
     "min_species_for_image": 1,    # below this, post the free poster (no paid call)
     "max_paid_images_per_day": 1,  # hard cap on paid gpt-image-1 calls per day
     "capture_window_minutes": 60,  # 'capture current birds' looks back this far
-    "min_species_confidence": 0.65,  # only report species heard at least this well
+    "min_species_confidence": 0.0,   # hard hide floor; 0 = show everything, marked by reliability tier
     "dashboard_port": 8355,
 }
 

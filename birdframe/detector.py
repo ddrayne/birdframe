@@ -81,7 +81,10 @@ class Detector:
 
     def _build_whitelist(self, lat, lon, floor, when) -> set[str]:
         result = self._geo.predict(lat, lon, week=week_of_year(when))
-        return {name for name, conf in _rows_to_pairs(result) if conf >= floor}
+        pairs = _rows_to_pairs(result)
+        # Keep the full plausibility map (by scientific name) for reliability scoring.
+        self.geo_by_scientific = {parse_species_name(n)[0]: conf for n, conf in pairs}
+        return {name for name, conf in pairs if conf >= floor}
 
     def refresh_whitelist(self, lat, lon, floor, when) -> None:
         self.whitelist = self._build_whitelist(lat, lon, floor, when)

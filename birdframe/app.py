@@ -93,6 +93,7 @@ def build_runtime(config: Config) -> Runtime:
         min_species_for_image=config.min_species_for_image,
         max_paid_images_per_day=config.max_paid_images_per_day,
         min_species_confidence=config.min_species_confidence,
+        geo_lookup=getattr(detector, "geo_by_scientific", {}),
     )
     publisher = Publisher(
         frame_url=config.frame_url, hold_minutes=config.frame_hold_minutes,
@@ -147,7 +148,8 @@ def _start_dashboard(runtime: Runtime, config: Config) -> None:
                      publisher=runtime.publisher, config=config,
                      apply_settings=apply_settings,
                      styles_dir=DEFAULT_STYLES_DIR,
-                     preview_dir=DATA_DIR / "style_previews")
+                     preview_dir=DATA_DIR / "style_previews",
+                     geo_lookup=getattr(runtime.detector, "geo_by_scientific", {}))
     app = create_app(ctx)
     # Bind to all interfaces so other devices on the home network can reach it.
     server = uvicorn.Server(uvicorn.Config(

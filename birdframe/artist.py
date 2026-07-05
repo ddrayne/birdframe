@@ -7,10 +7,11 @@ from pathlib import Path
 
 log = logging.getLogger("birdframe")
 
-from birdframe.compose import compose_final, fallback_poster
-from birdframe.rollup import build_prompt, build_scene
-from birdframe.store import ImageRecord, Store
-from birdframe.styles import Style, choose_style
+from birdframe.compose import compose_final, fallback_poster  # noqa: E402
+from birdframe.reliability import GEO_DEFAULT, assess, is_reliable  # noqa: E402
+from birdframe.rollup import build_prompt, build_scene  # noqa: E402
+from birdframe.store import ImageRecord, Store  # noqa: E402
+from birdframe.styles import Style, choose_style  # noqa: E402
 
 
 class Artist:
@@ -18,7 +19,7 @@ class Artist:
                  archive_dir: Path, weather_fn, latitude: float, longitude: float,
                  style_mode: str = "rotate", pinned_style: str = "",
                  min_species_for_image: int = 1, max_paid_images_per_day: int = 1,
-                 min_species_confidence: float = 0.0):
+                 min_species_confidence: float = 0.0, geo_lookup=None):
         self.store = store
         self.styles = styles
         self.image_client = image_client
@@ -32,6 +33,17 @@ class Artist:
         self.min_species_for_image = min_species_for_image
         self.max_paid_images_per_day = max_paid_images_per_day
         self.min_species_confidence = min_species_confidence
+        self.geo_lookup = geo_lookup or {}
+
+    def _reliable(self, species_days):
+        """Keep only trustworthy birds — tentative detections (e.g. an
+        implausible one-off) don't belong in the day's artwork."""
+        out = []
+        for s in species_days:
+            geo = self.geo_lookup.get(s.scientific_name, GEO_DEFAULT)
+            if is_reliable(assess(s.best_confidence, geo, s.count)):
+                out.append(s)
+        return out
 
     def _may_spend(self, species_count: int, when: datetime, force_paid: bool) -> bool:
         """Whether a paid gpt-image-1 call is allowed right now.
@@ -58,9 +70,12 @@ class Artist:
         if species_days is None:
             species_days = self.store.species_for_day(
                 when, min_confidence=self.min_species_confidence)
+        # The artwork celebrates only trustworthy birds; tentative ones are shown
+        # on the dashboard but kept out of the picture.
+        species_days = self._reliable(species_days)
         species_names = [s.common_name for s in species_days]
         if not species_names:
-            return None                       # nothing heard — never make an empty picture
+            return None                       # nothing reliable to picture
         todays = [im for im in self.store.recent_images(limit=12)
                   if im.generated_at.date() == when.date() and im.species == species_names]
         # Reuse an existing *real* picture of the same birds (no dupe, no respend).

@@ -42,6 +42,24 @@ class AppContext:
     apply_settings: Callable[[], None] = None
     styles_dir: object = None
     preview_dir: object = None
+    geo_lookup: object = None       # dict {scientific_name: plausibility} for reliability
+
+
+def _assess_species(ctx, s):
+    """Attach a reliability assessment to a SpeciesDay for honest presentation."""
+    from birdframe.reliability import GEO_DEFAULT, assess
+    geo = GEO_DEFAULT
+    if ctx.geo_lookup:
+        geo = ctx.geo_lookup.get(s.scientific_name, GEO_DEFAULT)
+    a = assess(s.best_confidence, geo, s.count)
+    return {
+        "common_name": s.common_name, "scientific_name": s.scientific_name,
+        "count": s.count, "best_confidence": round(s.best_confidence, 2),
+        "first_heard": s.first_heard.strftime("%H:%M"),
+        "last_heard": s.last_heard.strftime("%H:%M"), "peak_hour": s.peak_hour,
+        "tier": a.tier, "reliability": a.score, "reasons": a.reasons,
+        "geo": round(geo, 3),
+    }
 
 
 def create_app(ctx: AppContext) -> FastAPI:
@@ -120,20 +138,15 @@ def create_app(ctx: AppContext) -> FastAPI:
     def _conf_floor() -> float:
         return float(getattr(ctx.config, "min_species_confidence", 0.0) or 0.0)
 
+    _TIER_ORDER = {"confirmed": 0, "probable": 1, "tentative": 2}
+
     @app.get("/api/today")
     def today():
         now = ctx.now()
         species = ctx.store.species_for_day(now, min_confidence=_conf_floor())
-        return {
-            "date": now.strftime("%Y-%m-%d"),
-            "species": [
-                {"common_name": s.common_name, "scientific_name": s.scientific_name,
-                 "count": s.count, "first_heard": s.first_heard.strftime("%H:%M"),
-                 "last_heard": s.last_heard.strftime("%H:%M"),
-                 "peak_hour": s.peak_hour, "best_confidence": round(s.best_confidence, 2)}
-                for s in species
-            ],
-        }
+        assessed = [_assess_species(ctx, s) for s in species]
+        assessed.sort(key=lambda x: (_TIER_ORDER[x["tier"]], -x["count"]))
+        return {"date": now.strftime("%Y-%m-%d"), "species": assessed}
 
     @app.get("/api/now")
     def now_listening():
@@ -148,6 +161,17 @@ def create_app(ctx: AppContext) -> FastAPI:
         today = ctx.store.species_for_day(now, min_confidence=floor)
         first_ever = ctx.store.first_ever_on_day(now)
         latest = recent[0] if recent else None
+        window_assessed = [_assess_species(ctx, s) for s in window]
+        window_assessed.sort(key=lambda x: (_TIER_ORDER[x["tier"]], -x["count"]))
+        # tier of the most-recent bird, from its window/day track record
+        latest_tier = None
+        if latest is not None:
+            match = next((w for w in window_assessed if w["scientific_name"] == latest.scientific_name), None)
+            if match is None:
+                from birdframe.reliability import GEO_DEFAULT, assess
+                geo = (ctx.geo_lookup or {}).get(latest.scientific_name, GEO_DEFAULT)
+                match = {"tier": assess(latest.confidence, geo, 1).tier}
+            latest_tier = match["tier"]
         return {
             "now": now.strftime("%H:%M:%S"),
             "window_minutes": window_min,
@@ -157,17 +181,14 @@ def create_app(ctx: AppContext) -> FastAPI:
                 "confidence": round(latest.confidence, 2),
                 "at": latest.timestamp.strftime("%H:%M:%S"),
                 "seconds_ago": max(0, int((now - latest.timestamp).total_seconds())),
+                "tier": latest_tier,
             },
             "feed": [
                 {"common_name": d.common_name, "scientific_name": d.scientific_name,
                  "confidence": round(d.confidence, 2), "at": d.timestamp.strftime("%H:%M:%S")}
                 for d in recent
             ],
-            "window_species": [
-                {"common_name": s.common_name, "scientific_name": s.scientific_name,
-                 "count": s.count, "best_confidence": round(s.best_confidence, 2)}
-                for s in window
-            ],
+            "window_species": window_assessed,
             "activity": ctx.store.activity_buckets(
                 now - timedelta(minutes=window_min), now, n=24, min_confidence=floor),
             "today_species_count": len(today),
