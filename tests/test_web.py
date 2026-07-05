@@ -109,6 +109,9 @@ def test_now_endpoint_reports_latest_and_feed(tmp_path):
     assert data["latest"]["at"] == "11:30:00"
     assert data["feed"][0]["common_name"] == "Common Blackbird"
     assert data["today_species_count"] == 2
+    assert data["window_species"][0]["scientific_name"] == "Turdus merula"
+    assert isinstance(data["activity"], list) and len(data["activity"]) == 24
+    assert sum(data["activity"]) >= 1
 
 
 def test_now_endpoint_empty_is_graceful(tmp_path):

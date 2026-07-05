@@ -91,6 +91,10 @@
   .hero .meta { color:var(--muted); font-size:14px; margin-top:12px;
     display:inline-flex; gap:14px; flex-wrap:wrap; justify-content:center; }
   .hero .meta b { color:var(--ink); font-variant-numeric:tabular-nums; }
+  .spark { margin-top:18px; }
+  .spark svg { width:min(280px,80%); height:34px; display:block; margin:0 auto; }
+  .spark-cap { color:var(--muted); font-size:11px; text-transform:uppercase;
+    letter-spacing:.08em; margin-top:4px; }
 
   .actionbar { display:flex; gap:12px; align-items:center; justify-content:center;
     flex-wrap:wrap; margin:16px 0 22px; }
@@ -270,6 +274,21 @@ const $ = s => document.querySelector(s);
 const esc = s => (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const slugify = s => s.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
 
+// Live activity sparkline (detections over the window) as an inline SVG area.
+function sparkline(data) {
+  if (!data || !data.length || !data.some(v=>v>0)) return '';
+  const w=280, h=34, max=Math.max(...data,1), n=data.length, step=w/(n-1);
+  const pts = data.map((v,i)=>[i*step, h-4-(v/max)*(h-8)]);
+  const line = pts.map((p,i)=>`${i?'L':'M'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+  const area = `M0,${h} ${line.replace('M','L')} L${w},${h} Z`;
+  const [ex,ey]=pts[pts.length-1];
+  return `<div class="spark"><svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
+    <path d="${area}" fill="var(--accent)" opacity="0.12"/>
+    <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linejoin="round"/>
+    <circle cx="${ex.toFixed(1)}" cy="${ey.toFixed(1)}" r="3" fill="var(--live)"/></svg>
+    <div class="spark-cap">song over the last hour</div></div>`;
+}
+
 // A bird name → an underlined link that opens Wikipedia and shows a hover card.
 function birdLink(common, sci) {
   return `<a class="bird-name" data-sci="${esc(sci)}" data-common="${esc(common)}"
@@ -301,9 +320,11 @@ async function loadNow() {
     <div class="bird">${birdLink(d.latest.common_name, d.latest.scientific_name)}</div>
     <div class="sci">${esc(d.latest.scientific_name)}</div>
     <div class="meta"><span>heard <b>${d.latest.seconds_ago<90?d.latest.seconds_ago+'s ago':'at '+d.latest.at}</b></span>
-      <span>confidence <b>${d.latest.confidence}</b></span></div>`
+      <span>confidence <b>${d.latest.confidence}</b></span></div>
+    ${sparkline(d.activity)}`
     : `<div class="eyebrow"><span class="livedot"></span> Listening</div>
-       <div class="meta" style="margin-top:14px">The mic is open and waiting for the next song.</div>`;
+       <div class="meta" style="margin-top:14px">The mic is open and waiting for the next song.</div>
+       ${sparkline(d.activity)}`;
   const top = d.feed[0] ? d.feed[0].at+d.feed[0].common_name : null;
   $('#feed').innerHTML = d.feed.length ? d.feed.map((f,i)=>`
     <div class="row ${i===0 && top!==lastTop ? 'fresh':''}">

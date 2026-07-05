@@ -146,6 +146,22 @@ class Store:
             for r in rows
         ]
 
+    def activity_buckets(self, start: datetime, end: datetime, n: int = 24,
+                         min_confidence: float = 0.0) -> list[int]:
+        """Detection counts split into n equal time buckets across [start, end] —
+        a little sparkline of the recent rhythm of song."""
+        rows = self._conn.execute(
+            "SELECT ts FROM detections WHERE ts >= ? AND ts <= ? AND confidence >= ?",
+            (start.strftime(_ISO), end.strftime(_ISO), min_confidence),
+        ).fetchall()
+        span = max(1.0, (end - start).total_seconds())
+        buckets = [0] * n
+        for r in rows:
+            ts = datetime.strptime(r["ts"], _ISO)
+            idx = int((ts - start).total_seconds() / span * n)
+            buckets[min(n - 1, max(0, idx))] += 1
+        return buckets
+
     def first_ever_on_day(self, when: datetime) -> set[str]:
         """Species whose earliest-ever detection date is this day."""
         day = when.strftime("%Y-%m-%d")

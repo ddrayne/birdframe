@@ -160,10 +160,12 @@ def create_app(ctx: AppContext) -> FastAPI:
                 for d in recent
             ],
             "window_species": [
-                {"common_name": s.common_name, "count": s.count,
-                 "best_confidence": round(s.best_confidence, 2)}
+                {"common_name": s.common_name, "scientific_name": s.scientific_name,
+                 "count": s.count, "best_confidence": round(s.best_confidence, 2)}
                 for s in window
             ],
+            "activity": ctx.store.activity_buckets(
+                now - timedelta(minutes=window_min), now, n=24, min_confidence=floor),
             "today_species_count": len(today),
             "new_today": sorted(first_ever),
         }
