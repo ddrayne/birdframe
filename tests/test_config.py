@@ -22,6 +22,18 @@ def test_roundtrip_save_and_load(tmp_path):
     assert reloaded.post_mode == "manual"
 
 
+def test_list_field_roundtrips(tmp_path):
+    # blocked_species is a list; tomlkit-wrapped values must save cleanly
+    path = tmp_path / "config.toml"
+    cfg = Config.load(path)
+    cfg.blocked_species = ["Great Crested Grebe", "Mallard"]
+    cfg.save()
+    reloaded = Config.load(path)
+    assert reloaded.blocked_species == ["Great Crested Grebe", "Mallard"]
+    reloaded.save()  # must not raise on a tomlkit-loaded list
+    assert Config.load(path).blocked_species == ["Great Crested Grebe", "Mallard"]
+
+
 def test_unknown_keys_ignored_and_partial_file_merges_defaults(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text('confidence_threshold = 0.42\nbogus_key = 1\n')

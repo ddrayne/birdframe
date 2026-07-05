@@ -75,7 +75,9 @@ class Config:
             known = {f.name for f in fields(cls)} - {"path"}
             for key, val in parsed.items():
                 if key in known:
-                    values[key] = val
+                    # Unwrap tomlkit's typed items to plain Python, so the values
+                    # round-trip cleanly (asdict can't rebuild a tomlkit Array).
+                    values[key] = val.unwrap() if hasattr(val, "unwrap") else val
         return cls(path=path, **values)
 
     def save(self) -> None:
