@@ -1,8 +1,11 @@
 """Compose a day's picture: rollup -> prompt -> image gen -> caption -> archive."""
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from pathlib import Path
+
+log = logging.getLogger("birdframe")
 
 from birdframe.compose import compose_final, fallback_poster
 from birdframe.rollup import build_prompt, build_scene
@@ -58,11 +61,13 @@ class Artist:
         species_names = [s.common_name for s in species_days]
         if not species_names:
             return None                       # nothing heard — never make an empty picture
-        for prev in self.store.recent_images(limit=8):
-            if prev.generated_at.date() == when.date() and prev.species == species_names:
-                # Same birds as an existing picture today — reuse it (so callers
-                # can still post/override the frame) without adding a gallery dupe.
-                return prev
+        todays = [im for im in self.store.recent_images(limit=12)
+                  if im.generated_at.date() == when.date() and im.species == species_names]
+        # Reuse an existing *real* picture of the same birds (no dupe, no respend).
+        # Never lock onto a fallback poster — those should keep retrying a real render.
+        real = next((im for im in todays if "(fallback)" not in im.style), None)
+        if real is not None:
+            return real
         first_ever = self.store.first_ever_on_day(when)
         weather = self.weather_fn(self.latitude, self.longitude, when)
         scene = build_scene(species_days, first_ever, weather, when)
@@ -72,15 +77,23 @@ class Artist:
 
         style_label = style.name
         final = None
-        if self._may_spend(len(species_days), when, force_paid):
+        spend = self._may_spend(len(species_days), when, force_paid)
+        log.info("Artist: %d species, force=%s, image_client=%s, spending=%s",
+                 len(species_names), force_paid, self.image_client is not None, spend)
+        if spend:
             try:
                 art_bytes = self.image_client.generate(prompt)
                 final = compose_final(art_bytes, when, species_names)
-            except Exception:
+            except Exception as exc:
+                log.warning("Image generation failed (%s: %s) — using fallback poster",
+                            type(exc).__name__, exc)
                 final = None  # fall through to the free poster
         if final is None:
             final = fallback_poster(when, species_names)
             style_label = f"{style.name} (fallback)"
+            # Don't pile up identical fallback posters; reuse an existing one.
+            if todays:
+                return todays[0]
 
         filename = when.strftime("%Y-%m-%d-%H%M%S") + ".png"
         path = self.archive_dir / filename

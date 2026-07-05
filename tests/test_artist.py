@@ -68,9 +68,21 @@ def test_unchanged_species_reuses_without_gallery_dupe(tmp_path, mocker):
     first = artist.generate(when=datetime(2026, 7, 5, 12))
     assert first is not None
     again = artist.generate(when=datetime(2026, 7, 5, 13))  # same species, same day
-    assert again.id == first.id                   # reuses the existing picture
+    assert again.id == first.id                   # reuses the existing real picture
     assert len(store.recent_images()) == 1        # no duplicate added to the gallery
     assert client.generate.call_count == 1        # and no second paid render
+
+
+def test_fallback_is_not_reused_so_real_render_can_retry(tmp_path, mocker):
+    client = mocker.Mock()
+    client.generate.side_effect = [RuntimeError("api down"), _png()]  # fail then succeed
+    store, artist = _artist(tmp_path, client)
+    store.add_detection(Detection(datetime(2026, 7, 5, 6), "Erithacus rubecula", "European Robin", 0.9))
+    first = artist.generate(when=datetime(2026, 7, 5, 12), force_paid=True)   # -> fallback
+    assert first.style.endswith("(fallback)")
+    second = artist.generate(when=datetime(2026, 7, 5, 13), force_paid=True)  # retries, succeeds
+    assert not second.style.endswith("(fallback)")   # got the real image, didn't lock onto the poster
+    assert client.generate.call_count == 2
 
 
 def test_no_mic_no_detections_is_free(tmp_path, mocker):
