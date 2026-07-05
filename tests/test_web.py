@@ -13,17 +13,19 @@ class FakeArtist:
         self.forced = []
         self.out_path = out_path
 
-    def generate(self, when, force_paid=False):
+    def generate(self, when, force_paid=False, species_days=None):
         self.calls += 1
         self.forced.append(force_paid)
+        self.species_days_arg = species_days
         self.out_path.write_bytes(b"PNGBYTES")
         artist = self
+        names = [s.common_name for s in species_days] if species_days is not None else ["European Robin"]
 
         class R:
             id = 1
             path = str(artist.out_path)
             style = "ukiyo-e"
-            species = ["European Robin"]
+            species = names
         return R()
 
 
@@ -75,6 +77,42 @@ def test_post_now_generates_and_publishes(tmp_path):
 def test_index_served(tmp_path):
     _, _, client = _client(tmp_path)
     assert client.get("/").status_code == 200
+
+
+def test_now_endpoint_reports_latest_and_feed(tmp_path):
+    store, ctx, client = _client(tmp_path)
+    # add a more recent detection than the fixture's 06:00 robin
+    store.add_detection(Detection(datetime(2026, 7, 5, 11, 30), "Turdus merula", "Common Blackbird", 0.77))
+    data = client.get("/api/now").json()
+    assert data["latest"]["common_name"] == "Common Blackbird"
+    assert data["latest"]["at"] == "11:30:00"
+    assert data["feed"][0]["common_name"] == "Common Blackbird"
+    assert data["today_species_count"] == 2
+
+
+def test_now_endpoint_empty_is_graceful(tmp_path):
+    store = Store(tmp_path / "empty.sqlite")
+    from birdframe.config import Config
+    ctx = AppContext(store=store, artist=FakeArtist(tmp_path / "i.png"),
+                     publisher=FakePublisher(), now=lambda: datetime(2026, 7, 5, 12),
+                     config=Config.load(tmp_path / "c.toml"))
+    client = TestClient(create_app(ctx))
+    data = client.get("/api/now").json()
+    assert data["latest"] is None
+    assert data["feed"] == []
+
+
+def test_capture_uses_window_species_and_forces_paid(tmp_path):
+    store, ctx, client = _client(tmp_path)
+    # birds within the last 60 min of "now" (12:00): one at 11:30
+    store.add_detection(Detection(datetime(2026, 7, 5, 11, 30), "Turdus merula", "Common Blackbird", 0.77))
+    resp = client.post("/api/capture")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["publish"] == "posted"
+    assert ctx.artist.forced[-1] is True                    # explicit action forces a real image
+    assert "Common Blackbird" in body["species"]            # window species used
+    assert "European Robin" not in body["species"]          # the 06:00 robin is outside the 60-min window
 
 
 def test_get_settings_returns_grouped_values(tmp_path):

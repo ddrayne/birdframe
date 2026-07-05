@@ -30,6 +30,7 @@ DEFAULTS = {
     "image_quality": "high",
     "min_species_for_image": 1,    # below this, post the free poster (no paid call)
     "max_paid_images_per_day": 1,  # hard cap on paid gpt-image-1 calls per day
+    "capture_window_minutes": 60,  # 'capture current birds' looks back this far
     "dashboard_port": 8355,
 }
 
@@ -57,6 +58,7 @@ class Config:
     image_quality: str
     min_species_for_image: int
     max_paid_images_per_day: int
+    capture_window_minutes: int
     dashboard_port: int
     path: Path = DEFAULT_CONFIG_PATH
 

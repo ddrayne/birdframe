@@ -44,8 +44,10 @@ class Artist:
             return False
         return self.store.count_paid_images_for_day(when) < self.max_paid_images_per_day
 
-    def generate(self, when: datetime, force_paid: bool = False) -> ImageRecord:
-        species_days = self.store.species_for_day(when)
+    def generate(self, when: datetime, force_paid: bool = False,
+                 species_days=None) -> ImageRecord:
+        if species_days is None:
+            species_days = self.store.species_for_day(when)
         species_names = [s.common_name for s in species_days]
         first_ever = self.store.first_ever_on_day(when)
         weather = self.weather_fn(self.latitude, self.longitude, when)

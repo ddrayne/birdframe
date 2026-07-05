@@ -84,12 +84,9 @@ class Store:
                  det.scientific_name, det.common_name, det.confidence),
             )
 
-    def species_for_day(self, when: datetime) -> list[SpeciesDay]:
-        day = when.strftime("%Y-%m-%d")
-        rows = self._conn.execute(
-            "SELECT ts, scientific_name, common_name, confidence FROM detections WHERE day = ?",
-            (day,),
-        ).fetchall()
+    @staticmethod
+    def _aggregate(rows) -> list[SpeciesDay]:
+        """Roll raw detection rows up into per-species summaries, most-heard first."""
         agg: dict[str, dict] = {}
         for r in rows:
             ts = datetime.strptime(r["ts"], _ISO)
@@ -112,6 +109,36 @@ class Store:
         ]
         result.sort(key=lambda s: s.count, reverse=True)
         return result
+
+    def species_for_day(self, when: datetime) -> list[SpeciesDay]:
+        rows = self._conn.execute(
+            "SELECT ts, scientific_name, common_name, confidence FROM detections WHERE day = ?",
+            (when.strftime("%Y-%m-%d"),),
+        ).fetchall()
+        return self._aggregate(rows)
+
+    def species_in_window(self, start: datetime, end: datetime) -> list[SpeciesDay]:
+        """Species heard within an arbitrary [start, end] window — powers the
+        'capture current birds' snapshot of the recent live soundscape."""
+        rows = self._conn.execute(
+            "SELECT ts, scientific_name, common_name, confidence FROM detections"
+            " WHERE ts >= ? AND ts <= ?",
+            (start.strftime(_ISO), end.strftime(_ISO)),
+        ).fetchall()
+        return self._aggregate(rows)
+
+    def recent_detections(self, limit: int = 50) -> list[Detection]:
+        """The most recent individual detections, newest first — the live feed."""
+        rows = self._conn.execute(
+            "SELECT ts, scientific_name, common_name, confidence FROM detections"
+            " ORDER BY ts DESC, id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [
+            Detection(datetime.strptime(r["ts"], _ISO), r["scientific_name"],
+                      r["common_name"], r["confidence"])
+            for r in rows
+        ]
 
     def first_ever_on_day(self, when: datetime) -> set[str]:
         """Species whose earliest-ever detection date is this day."""

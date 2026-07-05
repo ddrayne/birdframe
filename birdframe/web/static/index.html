@@ -55,6 +55,31 @@
   .setfield input, .setfield select { font:inherit; padding:6px 8px;
     border:1px solid var(--line); border-radius:6px; background:var(--card);
     color:var(--ink); min-width:180px; }
+  .hero { background:var(--card); border:1px solid var(--line); border-radius:14px;
+    padding:28px 24px; margin-bottom:16px; text-align:center; }
+  .hero-label { color:var(--muted); font-size:13px; text-transform:uppercase;
+    letter-spacing:.08em; }
+  .hero-bird { font-size:34px; margin:6px 0 2px; }
+  .hero-sci { font-style:italic; color:var(--muted); }
+  .hero-meta { color:var(--muted); font-size:14px; margin-top:8px; }
+  .pulse { display:inline-block; width:9px; height:9px; border-radius:50%;
+    background:var(--accent); margin-right:7px; vertical-align:middle;
+    animation:pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:.35;transform:scale(.8)} 50%{opacity:1;transform:scale(1.1)} }
+  .mini { font-size:13px; text-transform:uppercase; letter-spacing:.06em;
+    color:var(--accent); margin:0 0 8px; }
+  .nowgrid { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+  @media (max-width:640px){ .nowgrid{ grid-template-columns:1fr; } }
+  .feedrow { display:flex; justify-content:space-between; align-items:center;
+    gap:10px; padding:7px 0; border-bottom:1px solid var(--line); }
+  .feedrow .t { color:var(--muted); font-variant-numeric:tabular-nums; font-size:13px; }
+  .feedrow.fresh { animation:flash 1.2s ease-out; }
+  @keyframes flash { from{ background:color-mix(in srgb, var(--accent) 22%, transparent); } to{ background:transparent; } }
+  .conf { height:6px; border-radius:3px; background:var(--accent); display:inline-block;
+    vertical-align:middle; margin-left:8px; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; }
+  .chip { background:color-mix(in srgb, var(--accent) 15%, transparent);
+    color:var(--accent); border-radius:999px; padding:3px 10px; font-size:13px; }
 </style>
 </head>
 <body>
@@ -64,12 +89,35 @@
 </header>
 <main>
   <nav>
-    <button data-tab="today" class="active">Today</button>
+    <button data-tab="now" class="active">Now</button>
+    <button data-tab="today">Today</button>
     <button data-tab="gallery">Gallery</button>
     <button data-tab="settings">Settings</button>
   </nav>
 
-  <section id="today">
+  <section id="now">
+    <div class="hero" id="hero">
+      <div class="hero-label">Listening…</div>
+    </div>
+    <div class="toolbar">
+      <button class="btn" id="captureBtn">Capture current birds</button>
+      <span class="status" id="captureStatus"></span>
+    </div>
+    <div class="nowgrid">
+      <div>
+        <h3 class="mini">Heard just now</h3>
+        <div id="feed"></div>
+      </div>
+      <div>
+        <h3 class="mini">In the last <span id="winMin">60</span> min</h3>
+        <div id="windowSpecies"></div>
+        <h3 class="mini" style="margin-top:18px">New for today</h3>
+        <div id="newToday" class="chips"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="today" hidden>
     <div class="toolbar">
       <button class="btn" id="postNow">Post now</button>
       <span class="status" id="status"></span>
@@ -93,14 +141,64 @@
 <script>
 const $ = s => document.querySelector(s);
 const tabs = document.querySelectorAll('nav button');
+let activeTab = 'now';
 tabs.forEach(b => b.onclick = () => {
+  activeTab = b.dataset.tab;
   tabs.forEach(x => x.classList.toggle('active', x === b));
-  $('#today').hidden = b.dataset.tab !== 'today';
-  $('#gallery').hidden = b.dataset.tab !== 'gallery';
-  $('#settings').hidden = b.dataset.tab !== 'settings';
-  if (b.dataset.tab === 'gallery') loadGallery();
-  if (b.dataset.tab === 'settings') loadSettings();
+  ['now','today','gallery','settings'].forEach(t => $('#'+t).hidden = activeTab !== t);
+  if (activeTab === 'gallery') loadGallery();
+  if (activeTab === 'settings') loadSettings();
+  if (activeTab === 'now') loadNow();
+  if (activeTab === 'today') loadToday();
 });
+
+// ---- Now Listening (live) ----
+let lastTopAt = null;
+async function loadNow() {
+  let d;
+  try { d = await (await fetch('/api/now')).json(); }
+  catch { return; }
+  $('#winMin').textContent = d.window_minutes;
+  const hero = $('#hero');
+  if (d.latest) {
+    const ago = d.latest.seconds_ago;
+    const when = ago < 90 ? `${ago}s ago` : `at ${d.latest.at}`;
+    hero.innerHTML = `
+      <div class="hero-label"><span class="pulse"></span>Most recent bird</div>
+      <div class="hero-bird">${d.latest.common_name}</div>
+      <div class="hero-sci">${d.latest.scientific_name}</div>
+      <div class="hero-meta">heard ${when} · confidence ${d.latest.confidence} ·
+        ${d.today_species_count} species today</div>`;
+  } else {
+    hero.innerHTML = `<div class="hero-label"><span class="pulse"></span>Listening…</div>
+      <div class="hero-meta" style="margin-top:10px">No birds heard yet — the mic is open and waiting.</div>`;
+  }
+  const topAt = d.feed[0] ? d.feed[0].at + d.feed[0].common_name : null;
+  $('#feed').innerHTML = d.feed.length ? d.feed.map((f,i) => `
+    <div class="feedrow ${i===0 && topAt!==lastTopAt ? 'fresh':''}">
+      <span>${f.common_name} <span class="conf" style="width:${Math.round(f.confidence*46)}px"></span></span>
+      <span class="t">${f.at}</span>
+    </div>`).join('') : '<div class="empty">Nothing in the feed yet.</div>';
+  lastTopAt = topAt;
+  $('#windowSpecies').innerHTML = d.window_species.length ? d.window_species.map(s => `
+    <div class="feedrow"><span>${s.common_name}</span>
+      <span class="t">×${s.count} · ${s.best_confidence}</span></div>`).join('')
+    : '<div class="empty">Quiet in this window.</div>';
+  $('#newToday').innerHTML = d.new_today.length
+    ? d.new_today.map(n => `<span class="chip">${n}</span>`).join('')
+    : '<span class="empty">None yet today.</span>';
+}
+
+async function capture() {
+  const btn = $('#captureBtn');
+  btn.disabled = true; $('#captureStatus').textContent = 'Capturing the current soundscape…';
+  try {
+    const r = await (await fetch('/api/capture', {method:'POST'})).json();
+    const birds = r.species.length ? r.species.join(', ') : 'a quiet moment';
+    $('#captureStatus').textContent = `Captured ${birds} — frame: ${r.publish}.`;
+  } catch (e) { $('#captureStatus').textContent = 'Error: ' + e; }
+  btn.disabled = false;
+}
 
 // Fields that are best edited as a dropdown rather than free text.
 const ENUMS = {
@@ -190,8 +288,10 @@ async function repost(id) {
 
 $('#postNow').onclick = postNow;
 $('#saveSettings').onclick = saveSettings;
-loadToday();
-setInterval(loadToday, 30000);
+$('#captureBtn').onclick = capture;
+loadNow();
+setInterval(() => { if (activeTab === 'now') loadNow(); }, 4000);
+setInterval(() => { if (activeTab === 'today') loadToday(); }, 30000);
 </script>
 </body>
 </html>

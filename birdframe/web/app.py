@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable
 
@@ -19,6 +19,7 @@ EDITABLE_SETTINGS = [
     ("Posting", ["post_mode", "post_time"]),
     ("Live mode", ["live_min_gap_minutes", "live_window_start", "live_window_end"]),
     ("Cost controls", ["min_species_for_image", "max_paid_images_per_day"]),
+    ("Live", ["capture_window_minutes"]),
     ("Frame", ["frame_url", "frame_hold_minutes", "frame_saturation"]),
     ("Style", ["style_mode", "pinned_style"]),
     ("Detection", ["confidence_threshold", "input_device"]),
@@ -62,6 +63,54 @@ def create_app(ctx: AppContext) -> FastAPI:
                 for s in species
             ],
         }
+
+    @app.get("/api/now")
+    def now_listening():
+        """The live listening view: the most recent bird, a streaming feed of
+        recent detections, and a rolling summary of the current soundscape."""
+        now = ctx.now()
+        window_min = getattr(ctx.config, "capture_window_minutes", 60)
+        recent = ctx.store.recent_detections(limit=40)
+        window = ctx.store.species_in_window(now - timedelta(minutes=window_min), now)
+        today = ctx.store.species_for_day(now)
+        first_ever = ctx.store.first_ever_on_day(now)
+        latest = recent[0] if recent else None
+        return {
+            "now": now.strftime("%H:%M:%S"),
+            "window_minutes": window_min,
+            "latest": None if latest is None else {
+                "common_name": latest.common_name,
+                "scientific_name": latest.scientific_name,
+                "confidence": round(latest.confidence, 2),
+                "at": latest.timestamp.strftime("%H:%M:%S"),
+                "seconds_ago": max(0, int((now - latest.timestamp).total_seconds())),
+            },
+            "feed": [
+                {"common_name": d.common_name, "scientific_name": d.scientific_name,
+                 "confidence": round(d.confidence, 2), "at": d.timestamp.strftime("%H:%M:%S")}
+                for d in recent
+            ],
+            "window_species": [
+                {"common_name": s.common_name, "count": s.count,
+                 "best_confidence": round(s.best_confidence, 2)}
+                for s in window
+            ],
+            "today_species_count": len(today),
+            "new_today": sorted(first_ever),
+        }
+
+    @app.post("/api/capture")
+    def capture():
+        """Capture the birds heard in the recent live window into a picture
+        (an explicit action → forces a real image if a key is set)."""
+        now = ctx.now()
+        window_min = getattr(ctx.config, "capture_window_minutes", 60)
+        species = ctx.store.species_in_window(now - timedelta(minutes=window_min), now)
+        rec = ctx.artist.generate(now, force_paid=True, species_days=species)
+        result = _publish(ctx, rec)
+        return {"image_id": rec.id, "species": rec.species,
+                "window_minutes": window_min,
+                "publish": result.status, "detail": result.detail}
 
     @app.get("/api/history")
     def history():

@@ -29,6 +29,27 @@ def test_first_ever_species(tmp_path):
     assert first_ever == {"European Robin"}
 
 
+def test_recent_detections_newest_first(tmp_path):
+    s = Store(tmp_path / "db.sqlite")
+    s.add_detection(Detection(_dt(5), "Erithacus rubecula", "European Robin", 0.9))
+    s.add_detection(Detection(_dt(7), "Turdus merula", "Common Blackbird", 0.8))
+    s.add_detection(Detection(_dt(6), "Troglodytes troglodytes", "Eurasian Wren", 0.7))
+    recent = s.recent_detections(limit=2)
+    assert [d.common_name for d in recent] == ["Common Blackbird", "Eurasian Wren"]
+    assert recent[0].confidence == 0.8
+
+
+def test_species_in_window(tmp_path):
+    s = Store(tmp_path / "db.sqlite")
+    s.add_detection(Detection(_dt(5), "Erithacus rubecula", "European Robin", 0.9))
+    s.add_detection(Detection(_dt(9), "Turdus merula", "Common Blackbird", 0.8))
+    s.add_detection(Detection(_dt(9, 30), "Turdus merula", "Common Blackbird", 0.6))
+    window = s.species_in_window(_dt(8), _dt(10))
+    assert len(window) == 1
+    assert window[0].common_name == "Common Blackbird"
+    assert window[0].count == 2
+
+
 def test_image_record_roundtrip(tmp_path):
     s = Store(tmp_path / "db.sqlite")
     img_id = s.add_image(datetime(2026, 7, 5, 21), "/tmp/x.png", "ukiyo-e", "a prompt", ["European Robin"])
