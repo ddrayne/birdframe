@@ -53,3 +53,17 @@ def test_score_orders_sensibly():
     strong = assess(0.95, 0.9, 8).score
     weak = assess(0.6, 0.05, 1).score
     assert strong > weak
+
+
+def test_for_artwork_excludes_uncommon_probables():
+    from birdframe.reliability import for_artwork
+    # a legit once-heard plausible bird (probable, geo 0.7) belongs in the art
+    robin = assess(0.9, 0.7, 1)
+    assert for_artwork(robin, 0.7) is True
+    # an "uncommon here" probable (moorhen) does NOT
+    moorhen = assess(0.77, 0.238, 4)
+    assert moorhen.tier == "probable"
+    assert for_artwork(moorhen, 0.238) is False
+    # tentative never
+    grebe = assess(0.87, 0.048, 3)
+    assert for_artwork(grebe, 0.048) is False

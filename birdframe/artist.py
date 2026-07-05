@@ -8,7 +8,7 @@ from pathlib import Path
 log = logging.getLogger("birdframe")
 
 from birdframe.compose import compose_final, fallback_poster  # noqa: E402
-from birdframe.reliability import GEO_DEFAULT, assess, is_reliable  # noqa: E402
+from birdframe.reliability import GEO_DEFAULT, assess, for_artwork  # noqa: E402
 from birdframe.rollup import build_prompt, build_scene  # noqa: E402
 from birdframe.store import ImageRecord, Store  # noqa: E402
 from birdframe.styles import Style, choose_style  # noqa: E402
@@ -36,12 +36,13 @@ class Artist:
         self.geo_lookup = geo_lookup or {}
 
     def _reliable(self, species_days):
-        """Keep only trustworthy birds — tentative detections (e.g. an
-        implausible one-off) don't belong in the day's artwork."""
+        """Keep only birds trustworthy AND plausible enough for the picture —
+        tentative detections and confident-but-implausible ones (e.g. a cluster
+        of hallucinated water birds) don't belong in the day's artwork."""
         out = []
         for s in species_days:
             geo = self.geo_lookup.get(s.scientific_name, GEO_DEFAULT)
-            if is_reliable(assess(s.best_confidence, geo, s.count)):
+            if for_artwork(assess(s.best_confidence, geo, s.count), geo):
                 out.append(s)
         return out
 

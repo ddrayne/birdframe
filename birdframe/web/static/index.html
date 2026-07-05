@@ -193,6 +193,13 @@
     padding:9px 0; border-bottom:1px solid var(--line); }
   .liferow:last-child { border-bottom:none; }
   .liferow .first { color:var(--muted); font-size:12.5px; }
+  .doubtful { margin-top:10px; border-top:1px dashed var(--line); padding-top:6px; }
+  .doubtful > summary { cursor:pointer; color:var(--muted); font-size:13.5px; padding:8px 0;
+    list-style:none; }
+  .doubtful > summary::-webkit-details-marker { display:none; }
+  .doubtful > summary::before { content:"▸ "; }
+  .doubtful[open] > summary::before { content:"▾ "; }
+  .doubtful .species { opacity:.72; }
 
   /* Gallery */
   .gallery { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:14px; }
@@ -510,23 +517,34 @@ function relMeter(s) {
   const on = s.tier==='confirmed' ? 3 : s.tier==='probable' ? 2 : 1;
   return `<span class="relmeter tier-${s.tier}" title="${esc(tierTitle(s))}">${[0,1,2].map(i=>`<i class="${i<on?'on':''}"></i>`).join('')}</span>`;
 }
+function speciesRow(s) {
+  return `<div class="species ${s.tier}">
+    <div>
+      <div class="name">${birdLink(s.common_name, s.scientific_name)} ${clipBtn(s.clip_url)} ${tierChip(s)}
+        <button class="nothere" title="Not here — stop detecting this & remove its history"
+          onclick="blockSpecies('${esc(s.common_name).replace(/'/g,"\\'")}')">not here</button></div>
+      <div class="sci">${esc(s.scientific_name)}</div>
+      ${s.reasons.length ? `<div class="reasons">${esc(s.reasons.join(' · '))}</div>` : ''}
+    </div>
+    <div style="text-align:right">
+      <div class="count">${s.count}</div>
+      <div class="t" style="color:var(--muted)">${s.first_heard}–${s.last_heard} · ${s.best_confidence}</div>
+      <div style="margin-top:4px">${relMeter(s)}</div>
+    </div></div>`;
+}
 async function loadToday() {
   const d = await (await fetch('/api/today')).json();
-  $('#speciesList').innerHTML = d.species.length ? d.species.map(s=>`
-    <div class="species ${s.tier}">
-      <div>
-        <div class="name">${birdLink(s.common_name, s.scientific_name)} ${clipBtn(s.clip_url)} ${tierChip(s)}
-          <button class="nothere" title="Not here — stop detecting this & remove its history"
-            onclick="blockSpecies('${esc(s.common_name).replace(/'/g,"\\'")}')">not here</button></div>
-        <div class="sci">${esc(s.scientific_name)}</div>
-        ${s.reasons.length ? `<div class="reasons">${esc(s.reasons.join(' · '))}</div>` : ''}
-      </div>
-      <div style="text-align:right">
-        <div class="count">${s.count}</div>
-        <div class="t" style="color:var(--muted)">${s.first_heard}–${s.last_heard} · ${s.best_confidence}</div>
-        <div style="margin-top:4px">${relMeter(s)}</div>
-      </div>
-    </div>`).join('') : '<div class="empty">No birds heard yet today. Listening…</div>';
+  if (!d.species.length) { $('#speciesList').innerHTML = '<div class="empty">No birds heard yet today. Listening…</div>'; return; }
+  const solid = d.species.filter(s=>s.tier!=='tentative');
+  const doubtful = d.species.filter(s=>s.tier==='tentative');
+  let html = solid.length ? solid.map(speciesRow).join('')
+    : '<div class="empty">Nothing confidently identified yet today.</div>';
+  if (doubtful.length) {
+    html += `<details class="doubtful"><summary title="Low-confidence, unlikely, or one-off detections — often BirdNET mishearing a noise. Play the clip to check.">
+      ${doubtful.length} doubtful ${doubtful.length===1?'detection':'detections'} — likely false positives, hidden</summary>
+      ${doubtful.map(speciesRow).join('')}</details>`;
+  }
+  $('#speciesList').innerHTML = html;
 }
 async function blockSpecies(name) {
   if (!confirm(`Mark “${name}” as not here?\nbirdframe will stop detecting it and remove its past detections.`)) return;

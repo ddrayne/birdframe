@@ -86,5 +86,20 @@ def assess(best_confidence: float, geo_plausibility: float, count: int) -> Asses
 
 
 def is_reliable(a: Assessment) -> bool:
-    """Trustworthy enough to celebrate in the day's picture."""
+    """Trustworthy enough to show prominently (not tucked away as doubtful)."""
     return a.tier in ("confirmed", "probable")
+
+
+# Habitat-agnostic plausibility floor for the artwork: BirdNET's geo model treats
+# some wetland birds as regionally possible even where there's no water, so a
+# whole cluster of confident-but-implausible water birds can slip through. The
+# picture should only celebrate birds both trustworthy AND genuinely likely here.
+ARTWORK_GEO_FLOOR = 0.30
+
+
+def for_artwork(a: Assessment, geo_plausibility: float) -> bool:
+    if a.tier == "confirmed":
+        return True
+    if a.tier == "probable" and geo_plausibility >= ARTWORK_GEO_FLOOR:
+        return True
+    return False

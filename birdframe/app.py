@@ -165,7 +165,8 @@ def _start_dashboard(runtime: Runtime, config: Config) -> None:
                      apply_settings=apply_settings,
                      styles_dir=DEFAULT_STYLES_DIR,
                      preview_dir=DATA_DIR / "style_previews",
-                     geo_lookup=getattr(runtime.detector, "geo_by_scientific", {}))
+                     geo_lookup=getattr(runtime.detector, "geo_by_scientific", {}),
+                     runtime=runtime)
     app = create_app(ctx)
     # Bind to all interfaces so other devices on the home network can reach it.
     server = uvicorn.Server(uvicorn.Config(
