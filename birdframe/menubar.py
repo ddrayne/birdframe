@@ -38,7 +38,9 @@ class BirdframeMenuBar(rumps.App):
             self.menu["Species today: …"].title = f"(error: {exc})"
 
     def _post_now(self, _):
-        threading.Thread(target=self.runtime.post_now, daemon=True).start()
+        # Explicit user action → force a real (paid) image if a key is set.
+        threading.Thread(target=lambda: self.runtime.post_now(force_paid=True),
+                         daemon=True).start()
         rumps.notification("birdframe", "Painting the day's birds", "Posting to the frame…")
 
     def _toggle_pause(self, item):

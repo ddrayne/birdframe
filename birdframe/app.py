@@ -69,6 +69,8 @@ def build_runtime(config: Config) -> Runtime:
         archive_dir=DATA_DIR / "images", weather_fn=describe_weather,
         latitude=config.latitude, longitude=config.longitude,
         style_mode=config.style_mode, pinned_style=config.pinned_style,
+        min_species_for_image=config.min_species_for_image,
+        max_paid_images_per_day=config.max_paid_images_per_day,
     )
     publisher = Publisher(
         frame_url=config.frame_url, hold_minutes=config.frame_hold_minutes,
@@ -102,8 +104,22 @@ def _start_dashboard(runtime: Runtime, config: Config) -> None:
 
     from birdframe.web.app import AppContext, create_app
 
+    def apply_settings() -> None:
+        """Push live-applicable config changes onto the running objects. The
+        scheduler reads runtime.config each tick, so mode/time/live-window apply
+        automatically; the artist and publisher hold their own copies."""
+        runtime.config = config
+        runtime.artist.min_species_for_image = config.min_species_for_image
+        runtime.artist.max_paid_images_per_day = config.max_paid_images_per_day
+        runtime.artist.style_mode = config.style_mode
+        runtime.artist.pinned_style = config.pinned_style
+        runtime.publisher.frame_url = config.frame_url.rstrip("/")
+        runtime.publisher.hold_minutes = config.frame_hold_minutes
+        runtime.publisher.saturation = config.frame_saturation
+
     ctx = AppContext(store=runtime.store, artist=runtime.artist,
-                     publisher=runtime.publisher)
+                     publisher=runtime.publisher, config=config,
+                     apply_settings=apply_settings)
     app = create_app(ctx)
     server = uvicorn.Server(uvicorn.Config(
         app, host="127.0.0.1", port=config.dashboard_port, log_level="warning"))

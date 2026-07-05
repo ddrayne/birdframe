@@ -71,9 +71,9 @@ class Runtime:
         if decide(self.scheduler_state(now), now):
             self.post_now(now)
 
-    def post_now(self, when: datetime | None = None) -> str:
+    def post_now(self, when: datetime | None = None, force_paid: bool = False) -> str:
         when = when or self.now()
-        rec = self.artist.generate(when)
+        rec = self.artist.generate(when, force_paid=force_paid)
         with open(rec.path, "rb") as fh:
             result = self.publisher.publish(fh.read())
         if result.status == "posted":

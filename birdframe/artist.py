@@ -13,7 +13,8 @@ from birdframe.styles import Style, choose_style
 class Artist:
     def __init__(self, store: Store, styles: list[Style], image_client,
                  archive_dir: Path, weather_fn, latitude: float, longitude: float,
-                 style_mode: str = "rotate", pinned_style: str = ""):
+                 style_mode: str = "rotate", pinned_style: str = "",
+                 min_species_for_image: int = 1, max_paid_images_per_day: int = 1):
         self.store = store
         self.styles = styles
         self.image_client = image_client
@@ -24,8 +25,26 @@ class Artist:
         self.longitude = longitude
         self.style_mode = style_mode
         self.pinned_style = pinned_style
+        self.min_species_for_image = min_species_for_image
+        self.max_paid_images_per_day = max_paid_images_per_day
 
-    def generate(self, when: datetime) -> ImageRecord:
+    def _may_spend(self, species_count: int, when: datetime, force_paid: bool) -> bool:
+        """Whether a paid gpt-image-1 call is allowed right now.
+
+        A real render costs money, so an *automatic* post only spends when there
+        is an image client, the day cleared the species threshold, and we are
+        still under the daily paid-image cap. An explicit user action
+        (force_paid, e.g. clicking Post Now) bypasses the threshold and cap.
+        """
+        if self.image_client is None:
+            return False
+        if force_paid:
+            return True
+        if species_count < self.min_species_for_image:
+            return False
+        return self.store.count_paid_images_for_day(when) < self.max_paid_images_per_day
+
+    def generate(self, when: datetime, force_paid: bool = False) -> ImageRecord:
         species_days = self.store.species_for_day(when)
         species_names = [s.common_name for s in species_days]
         first_ever = self.store.first_ever_on_day(when)
@@ -36,12 +55,14 @@ class Artist:
         prompt = build_prompt(style, scene)
 
         style_label = style.name
-        try:
-            if self.image_client is None:
-                raise RuntimeError("no image client configured")
-            art_bytes = self.image_client.generate(prompt)
-            final = compose_final(art_bytes, when, species_names)
-        except Exception:
+        final = None
+        if self._may_spend(len(species_days), when, force_paid):
+            try:
+                art_bytes = self.image_client.generate(prompt)
+                final = compose_final(art_bytes, when, species_names)
+            except Exception:
+                final = None  # fall through to the free poster
+        if final is None:
             final = fallback_poster(when, species_names)
             style_label = f"{style.name} (fallback)"
 

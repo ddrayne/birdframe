@@ -141,6 +141,17 @@ class Store:
             posted_at=datetime.strptime(r["posted_at"], _ISO) if r["posted_at"] else None,
         )
 
+    def count_paid_images_for_day(self, when: datetime) -> int:
+        """Images generated on this day via a real (paid) render — fallback
+        posters are labelled '... (fallback)' and are free, so exclude them."""
+        day = when.strftime("%Y-%m-%d")
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS n FROM images WHERE substr(generated_at, 1, 10) = ?"
+            " AND style NOT LIKE '%(fallback)%'",
+            (day,),
+        ).fetchone()
+        return row["n"]
+
     def recent_images(self, limit: int = 50) -> list[ImageRecord]:
         rows = self._conn.execute(
             "SELECT id FROM images ORDER BY generated_at DESC LIMIT ?", (limit,)
