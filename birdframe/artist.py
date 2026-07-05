@@ -57,10 +57,12 @@ class Artist:
                 when, min_confidence=self.min_species_confidence)
         species_names = [s.common_name for s in species_days]
         if not species_names:
-            return None                       # nothing heard — no empty picture
+            return None                       # nothing heard — never make an empty picture
         for prev in self.store.recent_images(limit=8):
             if prev.generated_at.date() == when.date() and prev.species == species_names:
-                return None                   # nothing changed since the last picture today
+                # Same birds as an existing picture today — reuse it (so callers
+                # can still post/override the frame) without adding a gallery dupe.
+                return prev
         first_ever = self.store.first_ever_on_day(when)
         weather = self.weather_fn(self.latitude, self.longitude, when)
         scene = build_scene(species_days, first_ever, weather, when)

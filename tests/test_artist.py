@@ -60,7 +60,7 @@ def test_no_birds_returns_none_no_empty_image(tmp_path, mocker):
     assert store.recent_images() == []
 
 
-def test_unchanged_species_today_is_skipped(tmp_path, mocker):
+def test_unchanged_species_reuses_without_gallery_dupe(tmp_path, mocker):
     client = mocker.Mock()
     client.generate.return_value = _png()
     store, artist = _artist(tmp_path, client)
@@ -68,8 +68,9 @@ def test_unchanged_species_today_is_skipped(tmp_path, mocker):
     first = artist.generate(when=datetime(2026, 7, 5, 12))
     assert first is not None
     again = artist.generate(when=datetime(2026, 7, 5, 13))  # same species, same day
-    assert again is None                          # nothing changed → not added again
-    assert len(store.recent_images()) == 1
+    assert again.id == first.id                   # reuses the existing picture
+    assert len(store.recent_images()) == 1        # no duplicate added to the gallery
+    assert client.generate.call_count == 1        # and no second paid render
 
 
 def test_no_mic_no_detections_is_free(tmp_path, mocker):
