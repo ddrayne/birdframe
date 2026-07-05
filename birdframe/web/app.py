@@ -22,7 +22,7 @@ EDITABLE_SETTINGS = [
     ("Live", ["capture_window_minutes"]),
     ("Frame", ["frame_url", "frame_hold_minutes", "frame_saturation"]),
     ("Style", ["style_mode", "pinned_style"]),
-    ("Detection", ["confidence_threshold", "input_device"]),
+    ("Detection", ["confidence_threshold", "min_species_confidence", "input_device"]),
     ("Image", ["openai_model", "image_quality"]),
 ]
 RESTART_REQUIRED = {
@@ -51,10 +51,13 @@ def create_app(ctx: AppContext) -> FastAPI:
     def index():
         return FileResponse(STATIC / "index.html")
 
+    def _conf_floor() -> float:
+        return float(getattr(ctx.config, "min_species_confidence", 0.0) or 0.0)
+
     @app.get("/api/today")
     def today():
         now = ctx.now()
-        species = ctx.store.species_for_day(now)
+        species = ctx.store.species_for_day(now, min_confidence=_conf_floor())
         return {
             "date": now.strftime("%Y-%m-%d"),
             "species": [
@@ -71,10 +74,12 @@ def create_app(ctx: AppContext) -> FastAPI:
         """The live listening view: the most recent bird, a streaming feed of
         recent detections, and a rolling summary of the current soundscape."""
         now = ctx.now()
+        floor = _conf_floor()
         window_min = getattr(ctx.config, "capture_window_minutes", 60)
-        recent = ctx.store.recent_detections(limit=40)
-        window = ctx.store.species_in_window(now - timedelta(minutes=window_min), now)
-        today = ctx.store.species_for_day(now)
+        recent = ctx.store.recent_detections(limit=40, min_confidence=floor)
+        window = ctx.store.species_in_window(now - timedelta(minutes=window_min), now,
+                                             min_confidence=floor)
+        today = ctx.store.species_for_day(now, min_confidence=floor)
         first_ever = ctx.store.first_ever_on_day(now)
         latest = recent[0] if recent else None
         return {
@@ -107,7 +112,8 @@ def create_app(ctx: AppContext) -> FastAPI:
         (an explicit action → forces a real image if a key is set)."""
         now = ctx.now()
         window_min = getattr(ctx.config, "capture_window_minutes", 60)
-        species = ctx.store.species_in_window(now - timedelta(minutes=window_min), now)
+        species = ctx.store.species_in_window(now - timedelta(minutes=window_min), now,
+                                              min_confidence=_conf_floor())
         rec = ctx.artist.generate(now, force_paid=True, species_days=species)
         result = _publish(ctx, rec)
         return {"image_id": rec.id, "species": rec.species,

@@ -14,7 +14,8 @@ class Artist:
     def __init__(self, store: Store, styles: list[Style], image_client,
                  archive_dir: Path, weather_fn, latitude: float, longitude: float,
                  style_mode: str = "rotate", pinned_style: str = "",
-                 min_species_for_image: int = 1, max_paid_images_per_day: int = 1):
+                 min_species_for_image: int = 1, max_paid_images_per_day: int = 1,
+                 min_species_confidence: float = 0.0):
         self.store = store
         self.styles = styles
         self.image_client = image_client
@@ -27,6 +28,7 @@ class Artist:
         self.pinned_style = pinned_style
         self.min_species_for_image = min_species_for_image
         self.max_paid_images_per_day = max_paid_images_per_day
+        self.min_species_confidence = min_species_confidence
 
     def _may_spend(self, species_count: int, when: datetime, force_paid: bool) -> bool:
         """Whether a paid gpt-image-1 call is allowed right now.
@@ -47,7 +49,8 @@ class Artist:
     def generate(self, when: datetime, force_paid: bool = False,
                  species_days=None) -> ImageRecord:
         if species_days is None:
-            species_days = self.store.species_for_day(when)
+            species_days = self.store.species_for_day(
+                when, min_confidence=self.min_species_confidence)
         species_names = [s.common_name for s in species_days]
         first_ever = self.store.first_ever_on_day(when)
         weather = self.weather_fn(self.latitude, self.longitude, when)

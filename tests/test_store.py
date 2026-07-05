@@ -29,6 +29,19 @@ def test_first_ever_species(tmp_path):
     assert first_ever == {"European Robin"}
 
 
+def test_min_confidence_filters_false_positives(tmp_path):
+    s = Store(tmp_path / "db.sqlite")
+    # a confident robin, and a single low-confidence "grebe" (likely a false positive)
+    s.add_detection(Detection(_dt(6), "Erithacus rubecula", "European Robin", 0.9))
+    s.add_detection(Detection(_dt(7), "Podiceps cristatus", "Great Crested Grebe", 0.52))
+    all_species = {sp.common_name for sp in s.species_for_day(_dt(12))}
+    assert "Great Crested Grebe" in all_species          # kept in the raw data
+    filtered = {sp.common_name for sp in s.species_for_day(_dt(12), min_confidence=0.65)}
+    assert filtered == {"European Robin"}                 # grebe dropped from the report
+    feed = s.recent_detections(min_confidence=0.65)
+    assert all(d.common_name == "European Robin" for d in feed)
+
+
 def test_recent_detections_newest_first(tmp_path):
     s = Store(tmp_path / "db.sqlite")
     s.add_detection(Detection(_dt(5), "Erithacus rubecula", "European Robin", 0.9))

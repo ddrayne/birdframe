@@ -78,6 +78,7 @@ def build_runtime(config: Config) -> Runtime:
         style_mode=config.style_mode, pinned_style=config.pinned_style,
         min_species_for_image=config.min_species_for_image,
         max_paid_images_per_day=config.max_paid_images_per_day,
+        min_species_confidence=config.min_species_confidence,
     )
     publisher = Publisher(
         frame_url=config.frame_url, hold_minutes=config.frame_hold_minutes,
@@ -118,6 +119,7 @@ def _start_dashboard(runtime: Runtime, config: Config) -> None:
         runtime.config = config
         runtime.artist.min_species_for_image = config.min_species_for_image
         runtime.artist.max_paid_images_per_day = config.max_paid_images_per_day
+        runtime.artist.min_species_confidence = config.min_species_confidence
         runtime.artist.style_mode = config.style_mode
         runtime.artist.pinned_style = config.pinned_style
         runtime.publisher.frame_url = config.frame_url.rstrip("/")

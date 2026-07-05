@@ -85,8 +85,12 @@ class Store:
             )
 
     @staticmethod
-    def _aggregate(rows) -> list[SpeciesDay]:
-        """Roll raw detection rows up into per-species summaries, most-heard first."""
+    def _aggregate(rows, min_confidence: float = 0.0) -> list[SpeciesDay]:
+        """Roll raw detection rows up into per-species summaries, most-heard first.
+
+        A species is only included if its *best* detection clears min_confidence,
+        so a one-off low-confidence guess (a classic BirdNET false positive) is
+        dropped from what we report — without deleting the raw data."""
         agg: dict[str, dict] = {}
         for r in rows:
             ts = datetime.strptime(r["ts"], _ISO)
@@ -106,18 +110,20 @@ class Store:
                 peak_hour=max(a["hours"], key=a["hours"].get), best_confidence=a["best"],
             )
             for name, a in agg.items()
+            if a["best"] >= min_confidence
         ]
         result.sort(key=lambda s: s.count, reverse=True)
         return result
 
-    def species_for_day(self, when: datetime) -> list[SpeciesDay]:
+    def species_for_day(self, when: datetime, min_confidence: float = 0.0) -> list[SpeciesDay]:
         rows = self._conn.execute(
             "SELECT ts, scientific_name, common_name, confidence FROM detections WHERE day = ?",
             (when.strftime("%Y-%m-%d"),),
         ).fetchall()
-        return self._aggregate(rows)
+        return self._aggregate(rows, min_confidence)
 
-    def species_in_window(self, start: datetime, end: datetime) -> list[SpeciesDay]:
+    def species_in_window(self, start: datetime, end: datetime,
+                          min_confidence: float = 0.0) -> list[SpeciesDay]:
         """Species heard within an arbitrary [start, end] window — powers the
         'capture current birds' snapshot of the recent live soundscape."""
         rows = self._conn.execute(
@@ -125,14 +131,14 @@ class Store:
             " WHERE ts >= ? AND ts <= ?",
             (start.strftime(_ISO), end.strftime(_ISO)),
         ).fetchall()
-        return self._aggregate(rows)
+        return self._aggregate(rows, min_confidence)
 
-    def recent_detections(self, limit: int = 50) -> list[Detection]:
+    def recent_detections(self, limit: int = 50, min_confidence: float = 0.0) -> list[Detection]:
         """The most recent individual detections, newest first — the live feed."""
         rows = self._conn.execute(
             "SELECT ts, scientific_name, common_name, confidence FROM detections"
-            " ORDER BY ts DESC, id DESC LIMIT ?",
-            (limit,),
+            " WHERE confidence >= ? ORDER BY ts DESC, id DESC LIMIT ?",
+            (min_confidence, limit),
         ).fetchall()
         return [
             Detection(datetime.strptime(r["ts"], _ISO), r["scientific_name"],
