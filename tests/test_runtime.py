@@ -1,0 +1,42 @@
+from datetime import datetime
+
+from birdframe.runtime import Runtime
+from birdframe.store import Store, Detection
+
+
+class FakeDetector:
+    sample_rate = 48000
+
+    def __init__(self, dets):
+        self._dets = dets
+
+    def predict_chunk(self, audio, sr, when):
+        return self._dets
+
+
+def test_chunk_callback_records_detections_and_tracks_new_species(tmp_path):
+    store = Store(tmp_path / "db.sqlite")
+    det = FakeDetector([Detection(datetime(2026, 7, 5, 6), "Erithacus rubecula", "European Robin", 0.9)])
+    rt = Runtime.for_test(store=store, detector=det, now=lambda: datetime(2026, 7, 5, 6))
+    rt.on_chunk(audio=b"", when=datetime(2026, 7, 5, 6))
+    assert store.species_for_day(datetime(2026, 7, 5, 6))[0].common_name == "European Robin"
+    assert rt.new_species_today is True
+
+
+def test_repeated_species_does_not_reflag(tmp_path):
+    store = Store(tmp_path / "db.sqlite")
+    det = FakeDetector([Detection(datetime(2026, 7, 5, 6), "Erithacus rubecula", "European Robin", 0.9)])
+    rt = Runtime.for_test(store=store, detector=det, now=lambda: datetime(2026, 7, 5, 6))
+    rt.on_chunk(audio=b"", when=datetime(2026, 7, 5, 6))
+    rt.new_species_today = False  # pretend we posted
+    rt.on_chunk(audio=b"", when=datetime(2026, 7, 5, 7))  # same species again
+    assert rt.new_species_today is False
+
+
+def test_new_species_flag_resets_next_day(tmp_path):
+    store = Store(tmp_path / "db.sqlite")
+    det = FakeDetector([])
+    rt = Runtime.for_test(store=store, detector=det, now=lambda: datetime(2026, 7, 5, 23))
+    rt.new_species_today = True
+    rt.roll_day(datetime(2026, 7, 6, 0, 1))  # crosses midnight into a new day
+    assert rt.new_species_today is False
