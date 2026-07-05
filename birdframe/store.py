@@ -212,6 +212,43 @@ class Store:
                 "DELETE FROM detections WHERE common_name = ?", (common_name,))
             return cur.rowcount
 
+    def life_list(self) -> list[dict]:
+        """Every species ever heard: first/last date, total count, best confidence."""
+        rows = self._conn.execute(
+            "SELECT common_name, scientific_name, MIN(day) AS first_day,"
+            " MAX(day) AS last_day, COUNT(*) AS total, MAX(confidence) AS best,"
+            " COUNT(DISTINCT day) AS days"
+            " FROM detections GROUP BY common_name ORDER BY first_day, common_name"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def hour_histogram(self) -> list[int]:
+        """All-time detection counts by hour of day (0–23) — the daily rhythm."""
+        buckets = [0] * 24
+        for r in self._conn.execute("SELECT ts FROM detections").fetchall():
+            buckets[datetime.strptime(r["ts"], _ISO).hour] += 1
+        return buckets
+
+    def daily_counts(self, limit: int = 60) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT day, COUNT(DISTINCT common_name) AS species, COUNT(*) AS detections"
+            " FROM detections GROUP BY day ORDER BY day DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(r) for r in reversed(rows)]
+
+    def totals(self) -> dict:
+        r = self._conn.execute(
+            "SELECT COUNT(DISTINCT common_name) AS species, COUNT(*) AS detections,"
+            " COUNT(DISTINCT day) AS days, MIN(day) AS since FROM detections"
+        ).fetchone()
+        return dict(r)
+
+    def all_detections(self):
+        """Every detection, oldest first — for CSV export."""
+        return self._conn.execute(
+            "SELECT ts, common_name, scientific_name, confidence FROM detections ORDER BY ts"
+        ).fetchall()
+
     def first_ever(self, common_name: str) -> bool:
         """True if this species has never been detected before (a life-list first)."""
         r = self._conn.execute(

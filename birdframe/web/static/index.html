@@ -178,6 +178,21 @@
   .playclip:hover { background:var(--accent-soft); }
   .playclip.playing { background:var(--accent); color:var(--surface); animation:pulseclip 1s infinite; }
   @keyframes pulseclip { 0%,100%{transform:scale(1)} 50%{transform:scale(1.12)} }
+  .statsrow { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:12px; }
+  .stat { background:var(--surface); border:1px solid var(--line); border-radius:12px;
+    padding:14px 16px; box-shadow:var(--shadow); }
+  .stat .n { font-family:var(--serif); font-size:26px; color:var(--accent); font-variant-numeric:tabular-nums; }
+  .stat .l { color:var(--muted); font-size:12.5px; text-transform:uppercase; letter-spacing:.06em; }
+  .hourchart { display:flex; align-items:flex-end; gap:3px; height:90px; }
+  .hourchart .bar { flex:1; background:var(--accent); opacity:.75; border-radius:3px 3px 0 0; min-height:2px;
+    position:relative; }
+  .hourchart .bar:hover { opacity:1; }
+  .hourchart .bar span { position:absolute; bottom:-18px; left:50%; transform:translateX(-50%);
+    font-size:9px; color:var(--muted); }
+  .liferow { display:flex; justify-content:space-between; align-items:center; gap:12px;
+    padding:9px 0; border-bottom:1px solid var(--line); }
+  .liferow:last-child { border-bottom:none; }
+  .liferow .first { color:var(--muted); font-size:12.5px; }
 
   /* Gallery */
   .gallery { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:14px; }
@@ -247,6 +262,7 @@
   <nav>
     <button data-tab="now" class="active">Now</button>
     <button data-tab="today">Today</button>
+    <button data-tab="census">Census</button>
     <button data-tab="gallery">Gallery</button>
     <button data-tab="styles">Styles</button>
     <button data-tab="settings">Settings</button>
@@ -287,6 +303,19 @@
       Only confirmed &amp; probable birds go into the picture.
     </p>
     <div class="card"><div id="speciesList" class="stack"></div></div>
+  </section>
+
+  <section id="census" hidden>
+    <div id="censusTotals" class="statsrow"></div>
+    <div class="card" style="margin:16px 0">
+      <h3 class="mini">The daily rhythm — when birds sing (all time, by hour)</h3>
+      <div id="hourChart" class="hourchart"></div>
+    </div>
+    <div class="actionbar" style="justify-content:space-between; margin:0 0 10px">
+      <h3 class="mini" style="margin:0">Life list — every species heard here</h3>
+      <a class="btn ghost small" href="/api/export.csv">Export CSV</a>
+    </div>
+    <div class="card"><div id="lifeList" class="stack"></div></div>
   </section>
 
   <section id="gallery" hidden>
@@ -362,7 +391,7 @@ function clipBtn(url) {
 }
 
 // Animated "listening" equaliser — five bars breathing like a live meter.
-const eq = () => '<span class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>';
+const eq = () => '<span class="eq" title="birdframe is actively listening to the microphone" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>';
 
 // Live activity sparkline (detections over the window) as an inline SVG area.
 function sparkline(data) {
@@ -372,7 +401,8 @@ function sparkline(data) {
   const line = pts.map((p,i)=>`${i?'L':'M'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
   const area = `M0,${h} ${line.replace('M','L')} L${w},${h} Z`;
   const [ex,ey]=pts[pts.length-1];
-  return `<div class="spark"><svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
+  return `<div class="spark" title="How much birdsong was detected in each part of the last hour — the gold dot is now">
+    <svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
     <path d="${area}" fill="var(--accent)" opacity="0.12"/>
     <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linejoin="round"/>
     <circle cx="${ex.toFixed(1)}" cy="${ey.toFixed(1)}" r="3" fill="var(--live)"/></svg>
@@ -388,12 +418,12 @@ function birdLink(common, sci) {
 
 // ---- Tabs ----
 let activeTab = 'now';
-const TABS = ['now','today','gallery','styles','settings'];
+const TABS = ['now','today','census','gallery','styles','settings'];
 document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
   activeTab = b.dataset.tab;
   document.querySelectorAll('nav button').forEach(x => x.classList.toggle('active', x===b));
   TABS.forEach(t => $('#'+t).hidden = activeTab!==t);
-  ({now:loadNow, today:loadToday, gallery:loadGallery, styles:loadStyles, settings:loadSettings}[activeTab])();
+  ({now:loadNow, today:loadToday, census:loadCensus, gallery:loadGallery, styles:loadStyles, settings:loadSettings}[activeTab])();
 });
 
 // ---- Now ----
@@ -402,9 +432,9 @@ async function loadNow() {
   let d; try { d = await (await fetch('/api/now')).json(); } catch { return; }
   $('#winMin').textContent = d.window_minutes;
   $('#statusline').innerHTML =
-    `<span><span class="livedot"></span> listening</span>
-     <span><b>${d.today_species_count}</b> species today</span>` +
-    (d.latest ? `<span>latest <b>${esc(d.latest.common_name)}</b></span>` : '');
+    `<span title="birdframe is running and listening to the microphone"><span class="livedot"></span> listening</span>
+     <span title="Distinct species heard so far today"><b>${d.today_species_count}</b> species today</span>` +
+    (d.latest ? `<span title="The most recently detected bird">latest <b>${esc(d.latest.common_name)}</b></span>` : '');
   $('#hero').innerHTML = d.latest ? `
     <div class="eyebrow">${eq()} Most recent bird</div>
     <div class="bird">${birdLink(d.latest.common_name, d.latest.scientific_name)} ${clipBtn(d.latest.clip_url)}</div>
@@ -421,8 +451,8 @@ async function loadNow() {
   $('#feed').innerHTML = d.feed.length ? d.feed.map((f,i)=>`
     <div class="row ${i===0 && top!==lastTop ? 'fresh':''}">
       <span>${birdLink(f.common_name, f.scientific_name)}
-        <span class="confbar" style="width:${Math.round(f.confidence*44)}px"></span></span>
-      <span class="t">${f.at}</span></div>`).join('') : '<div class="empty">Nothing heard just yet.</div>';
+        <span class="confbar" title="How confident BirdNET was: ${f.confidence}" style="width:${Math.round(f.confidence*44)}px"></span></span>
+      <span class="t" title="Time heard">${f.at}</span></div>`).join('') : '<div class="empty">Nothing heard just yet.</div>';
   lastTop = top;
   $('#windowSpecies').innerHTML = d.window_species.length ? d.window_species.map(s=>`
     <div class="row"><span>${birdLink(s.common_name, s.scientific_name||'')} ${clipBtn(s.clip_url)}
@@ -430,7 +460,7 @@ async function loadNow() {
       <span class="t">×${s.count} · ${s.best_confidence}</span></div>`).join('')
     : '<div class="empty">Quiet this last hour.</div>';
   $('#newToday').innerHTML = d.new_today.length
-    ? d.new_today.map(n=>`<span class="chip">${esc(n)}</span>`).join('')
+    ? d.new_today.map(n=>`<span class="chip" title="Heard today but not on any earlier day this session">${esc(n)}</span>`).join('')
     : '<span class="empty">None yet today.</span>';
 }
 let capturePoll = null, captureStart = 0;
@@ -463,14 +493,22 @@ async function capture() {
 }
 
 // ---- Today ----
+const TIER_HELP = {
+  confirmed: 'Confirmed — heard clearly, expected here, and more than once.',
+  probable: 'Probable — a good detection, but not strong on every count.',
+  tentative: 'Tentative — weak on at least one of: clarity, likelihood here, or repetition. Treat with caution.',
+};
+function tierTitle(s) {
+  const rel = s.reliability!=null ? ` (reliability ${Math.round(s.reliability*100)}%)` : '';
+  const why = (s.reasons&&s.reasons.length) ? ' — ' + s.reasons.join(', ') : '';
+  return TIER_HELP[s.tier] + rel + why;
+}
 function tierChip(s) {
-  const cls = 'tier-' + s.tier;
-  return `<span class="tier ${cls}" title="reliability ${Math.round(s.reliability*100)}%">${s.tier}</span>`;
+  return `<span class="tier tier-${s.tier}" title="${esc(tierTitle(s))}">${s.tier}</span>`;
 }
 function relMeter(s) {
   const on = s.tier==='confirmed' ? 3 : s.tier==='probable' ? 2 : 1;
-  const cls = 'tier-'+s.tier;
-  return `<span class="relmeter ${cls}">${[0,1,2].map(i=>`<i class="${i<on?'on':''}"></i>`).join('')}</span>`;
+  return `<span class="relmeter tier-${s.tier}" title="${esc(tierTitle(s))}">${[0,1,2].map(i=>`<i class="${i<on?'on':''}"></i>`).join('')}</span>`;
 }
 async function loadToday() {
   const d = await (await fetch('/api/today')).json();
@@ -553,6 +591,29 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'ArrowLeft') stepLightbox(-1);
   else if (e.key === 'ArrowRight') stepLightbox(1);
 });
+
+// ---- Census / history ----
+async function loadCensus() {
+  const d = await (await fetch('/api/census')).json();
+  const t = d.totals;
+  $('#censusTotals').innerHTML = `
+    <div class="stat" title="Distinct species heard here across all time"><div class="n">${t.species||0}</div><div class="l">species</div></div>
+    <div class="stat" title="Total individual detections recorded"><div class="n">${(t.detections||0).toLocaleString()}</div><div class="l">detections</div></div>
+    <div class="stat" title="Days on which at least one bird was heard"><div class="n">${t.days||0}</div><div class="l">days</div></div>
+    <div class="stat" title="The first day birdframe heard anything"><div class="n">${t.since?t.since.slice(5):'—'}</div><div class="l">listening since</div></div>`;
+  const max = Math.max(1, ...d.hours);
+  $('#hourChart').innerHTML = d.hours.map((v,h)=>`
+    <div class="bar" style="height:${Math.round(v/max*100)}%"
+      title="${v} detection${v===1?'':'s'} around ${String(h).padStart(2,'0')}:00">
+      ${h%6===0?`<span>${h}</span>`:''}</div>`).join('');
+  $('#lifeList').innerHTML = d.life_list.length ? d.life_list.slice().reverse().map(s=>`
+    <div class="liferow">
+      <div><span>${birdLink(s.common_name, s.scientific_name)}</span>
+        <span class="tier tier-${s.tier}" title="Overall reliability across all time — ${s.reasons.join(', ')||'heard clearly'}">${s.tier}</span>
+        <div class="first">first heard ${s.first_day} · heard ${s.total}× over ${s.days} day${s.days===1?'':'s'}</div></div>
+      <div class="count" title="Times heard in total">${s.total}</div>
+    </div>`).join('') : '<div class="empty">No history yet — birds will accumulate here over the days.</div>';
+}
 
 // ---- Styles ----
 let stylesData = {styles:[], sample_scene:'', key_set:false};

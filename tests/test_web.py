@@ -177,7 +177,7 @@ def test_post_settings_rejects_bad_value_and_unknown_key(tmp_path):
     resp = client.post("/api/settings", json={"max_paid_images_per_day": "lots"})
     assert resp.status_code == 400
     assert "max_paid_images_per_day" in resp.json()["fields"]
-    resp2 = client.post("/api/settings", json={"latitude": 10.0})  # not in editable list
+    resp2 = client.post("/api/settings", json={"chunk_seconds": 5.0})  # not in editable list
     assert resp2.status_code == 400
 
 
@@ -290,3 +290,26 @@ def test_today_annotates_reliability_and_sorts_tentative_last(tmp_path):
     assert "unusual for this area" in grebe["reasons"]
     black = data["species"][0]
     assert black["tier"] == "confirmed"
+
+
+def test_census_and_export(tmp_path):
+    from datetime import datetime as _dt
+    store = Store(tmp_path / "db.sqlite")
+    store.add_detection(Detection(_dt(2026, 6, 1, 6), "Turdus merula", "Eurasian Blackbird", 0.9))
+    store.add_detection(Detection(_dt(2026, 7, 5, 7), "Turdus merula", "Eurasian Blackbird", 0.95))
+    store.add_detection(Detection(_dt(2026, 7, 5, 8), "Erithacus rubecula", "European Robin", 0.8))
+    ctx = AppContext(store=store, artist=FakeArtist(tmp_path / "i.png"),
+                     publisher=FakePublisher(), now=lambda: _dt(2026, 7, 5, 12),
+                     config=Config.load(tmp_path / "c.toml"),
+                     geo_lookup={"Turdus merula": 0.97, "Erithacus rubecula": 0.7})
+    client = TestClient(create_app(ctx))
+    c = client.get("/api/census").json()
+    assert c["totals"]["species"] == 2
+    assert c["totals"]["detections"] == 3
+    assert len(c["hours"]) == 24
+    bb = next(e for e in c["life_list"] if e["common_name"] == "Eurasian Blackbird")
+    assert bb["first_day"] == "2026-06-01" and bb["total"] == 2 and bb["days"] == 2
+    assert bb["tier"] == "confirmed"
+    csv = client.get("/api/export.csv")
+    assert csv.status_code == 200 and "text/csv" in csv.headers["content-type"]
+    assert "Eurasian Blackbird" in csv.text

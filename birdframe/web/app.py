@@ -17,6 +17,7 @@ STATIC = Path(__file__).resolve().parent / "static"
 # app restarts (they configure objects built once at startup); everything else
 # is applied to the running app immediately.
 EDITABLE_SETTINGS = [
+    ("Location", ["latitude", "longitude"]),
     ("Posting", ["post_mode", "post_time"]),
     ("Live mode", ["live_min_gap_minutes", "live_window_start", "live_window_end"]),
     ("Cost controls", ["min_species_for_image", "max_paid_images_per_day"]),
@@ -31,6 +32,8 @@ RESTART_REQUIRED = {
     "latitude", "longitude", "geo_floor", "chunk_seconds",
     "chunk_overlap_seconds", "dashboard_port",
 }
+# 'latitude'/'longitude' are floats but the settings-POST coercion handles them;
+# they rebuild the species whitelist on restart.
 
 
 @dataclass
@@ -293,6 +296,31 @@ def create_app(ctx: AppContext) -> FastAPI:
     @app.get("/api/blocked")
     def blocked_species():
         return {"blocked_species": list(getattr(ctx.config, "blocked_species", []) or [])}
+
+    @app.get("/api/census")
+    def census():
+        from birdframe.reliability import GEO_DEFAULT, assess
+        entries = []
+        for r in ctx.store.life_list():
+            geo = (ctx.geo_lookup or {}).get(r["scientific_name"], GEO_DEFAULT)
+            a = assess(r["best"], geo, r["total"])
+            entries.append({
+                "common_name": r["common_name"], "scientific_name": r["scientific_name"],
+                "first_day": r["first_day"], "last_day": r["last_day"],
+                "total": r["total"], "days": r["days"], "best_confidence": round(r["best"], 2),
+                "tier": a.tier, "reasons": a.reasons,
+            })
+        return {"totals": ctx.store.totals(), "life_list": entries,
+                "hours": ctx.store.hour_histogram(), "daily": ctx.store.daily_counts()}
+
+    @app.get("/api/export.csv")
+    def export_csv():
+        from fastapi.responses import Response
+        lines = ["timestamp,common_name,scientific_name,confidence"]
+        for r in ctx.store.all_detections():
+            lines.append(f'{r["ts"]},"{r["common_name"]}","{r["scientific_name"]}",{r["confidence"]:.4f}')
+        return Response("\n".join(lines), media_type="text/csv",
+                        headers={"Content-Disposition": "attachment; filename=birdframe-detections.csv"})
 
     @app.get("/api/history")
     def history():
