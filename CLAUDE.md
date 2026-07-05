@@ -79,6 +79,32 @@ Key design boundaries worth preserving:
 Output is always exactly **1200×1600** (`compose.FRAME_W/FRAME_H`): art fills
 the top 1500px, a caption strip (date + species) the bottom 100px.
 
+## Reliability & false positives
+
+`reliability.py` is the general treatment of false positives — do NOT add
+per-species hacks. `assess(best_confidence, geo_plausibility, count)` returns a
+confirmed/probable/tentative tier + reasons. "Confirmed" is reserved for birds
+genuinely expected here (geo≥0.30) and clearly heard (≥0.70); regionally
+uncommon or modest-confidence birds are capped at probable. `for_artwork()` is
+stricter still — it keeps confident-but-implausible clusters (hallucinated water
+birds) out of the picture. The dashboard shows tentative detections but
+collapses them into a "doubtful" section. Per-species geo plausibility comes
+from `detector.geo_by_scientific` (built with the whitelist). Users can still
+hard-veto a species via the "not here" blocklist (`config.blocked_species`).
+
+## Other subsystems
+
+- **Audio clips** (`runtime._save_clip`): best clip per species/day as OGG under
+  the data dir; `store.clips` table; served at `/api/clip`, played inline.
+- **Census** (`store.life_list/hour_histogram/totals`, `/api/census`): life
+  list, all-time rhythm, CSV export.
+- **Narration** (`narrator.py`, `/api/narration`): one-line day story via
+  `gpt-4.1-mini`, cached per day, template fallback.
+- **Health** (`/api/health`) + macOS notifications (`app._notify`): mic loss,
+  unreachable frame, life-list firsts.
+- **Icon/PWA** (`icon.py` renders the app icon; manifest + `sw.js`).
+- CLI: `birdframe set-key | doctor | --help`.
+
 ## Styles
 
 Art styles are editable markdown files in `styles/` (`# name`, `## Prompt` with a

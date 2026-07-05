@@ -221,14 +221,44 @@ def _set_key_interactive() -> int:
     return 0
 
 
+def _doctor() -> int:
+    """`birdframe doctor` — check the setup and print what's ready or missing."""
+    ok = "✓"
+    warn = "⚠"
+    config = Config.load()
+    print("birdframe setup check\n")
+    print(f"  location        {config.latitude}, {config.longitude}")
+    key = secrets.get_openai_key()
+    print(f"  {ok if key else warn} OpenAI key     "
+          + ("set" if key else "missing — run 'birdframe set-key' (art uses a text poster without it)"))
+    try:
+        import sounddevice as sd
+        default_in = sd.query_devices(kind="input")["name"]
+        print(f"  {ok} microphone     default input: {default_in}")
+    except Exception as exc:
+        print(f"  {warn} microphone     could not query input devices: {exc}")
+    import httpx
+    frame = config.frame_url.rstrip("/")
+    try:
+        r = httpx.get(f"{frame}/status", timeout=5)
+        print(f"  {ok if r.status_code == 200 else warn} inky frame     {frame} — HTTP {r.status_code}")
+    except Exception:
+        print(f"  {warn} inky frame     {frame} — unreachable (birdframe still runs; images are archived)")
+    print(f"\n  dashboard will be at http://localhost:{config.dashboard_port}")
+    return 0
+
+
 def main() -> None:
     argv = sys.argv[1:]
     if argv and argv[0] == "set-key":
         raise SystemExit(_set_key_interactive())
+    if argv and argv[0] == "doctor":
+        raise SystemExit(_doctor())
     if argv and argv[0] in ("-h", "--help"):
-        print("Usage: birdframe [set-key]\n"
+        print("Usage: birdframe [set-key|doctor]\n"
               "  (no args)  run the listener, menu bar, and dashboard\n"
-              "  set-key    store your OpenAI API key in the macOS Keychain")
+              "  set-key    store your OpenAI API key in the macOS Keychain\n"
+              "  doctor     check location, key, microphone and frame")
         raise SystemExit(0)
 
     _setup_logging()
