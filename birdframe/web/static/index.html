@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>birdframe</title>
+<style>
+  :root {
+    --bg: #f7f5ef; --card: #fffef9; --ink: #23201a; --muted: #6b6455;
+    --line: #e5e0d3; --accent: #4a6b4a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#1a1815; --card:#232019; --ink:#ece7db; --muted:#a49c88;
+            --line:#33302a; --accent:#8fb98f; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font:16px/1.5 Georgia, 'Times New Roman', serif;
+         background:var(--bg); color:var(--ink); }
+  header { padding:28px 24px 12px; }
+  h1 { margin:0; font-size:28px; letter-spacing:.02em; }
+  .sub { color:var(--muted); font-size:14px; margin-top:4px; }
+  main { max-width:900px; margin:0 auto; padding:0 24px 48px; }
+  nav { display:flex; gap:8px; margin:16px 0 24px; border-bottom:1px solid var(--line); }
+  nav button { background:none; border:none; padding:10px 14px; font:inherit;
+    color:var(--muted); cursor:pointer; border-bottom:2px solid transparent; }
+  nav button.active { color:var(--ink); border-bottom-color:var(--accent); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px;
+    padding:16px 18px; margin-bottom:12px; }
+  .row { display:flex; justify-content:space-between; align-items:baseline; gap:12px; }
+  .name { font-size:18px; }
+  .sci { color:var(--muted); font-style:italic; font-size:13px; }
+  .count { font-variant-numeric:tabular-nums; color:var(--accent); font-size:20px; }
+  .times { color:var(--muted); font-size:13px; }
+  .btn { background:var(--accent); color:#fff; border:none; border-radius:8px;
+    padding:10px 18px; font:inherit; cursor:pointer; }
+  .btn:disabled { opacity:.5; cursor:default; }
+  .btn.ghost { background:none; color:var(--accent); border:1px solid var(--accent);
+    padding:6px 12px; font-size:14px; }
+  .toolbar { display:flex; gap:12px; align-items:center; margin-bottom:20px; }
+  .status { color:var(--muted); font-size:14px; }
+  .gallery { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
+    gap:12px; }
+  .gallery figure { margin:0; }
+  .gallery img { width:100%; border-radius:8px; border:1px solid var(--line);
+    aspect-ratio:3/4; object-fit:cover; background:var(--line); }
+  .gallery figcaption { font-size:12px; color:var(--muted); margin-top:4px; }
+  .empty { color:var(--muted); padding:24px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🐦 birdframe</h1>
+  <div class="sub">The birds heard outside the window in Edinburgh</div>
+</header>
+<main>
+  <nav>
+    <button data-tab="today" class="active">Today</button>
+    <button data-tab="gallery">Gallery</button>
+  </nav>
+
+  <section id="today">
+    <div class="toolbar">
+      <button class="btn" id="postNow">Post now</button>
+      <span class="status" id="status"></span>
+    </div>
+    <div id="speciesList"></div>
+  </section>
+
+  <section id="gallery" hidden>
+    <div class="gallery" id="galleryGrid"></div>
+  </section>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+const tabs = document.querySelectorAll('nav button');
+tabs.forEach(b => b.onclick = () => {
+  tabs.forEach(x => x.classList.toggle('active', x === b));
+  $('#today').hidden = b.dataset.tab !== 'today';
+  $('#gallery').hidden = b.dataset.tab !== 'gallery';
+  if (b.dataset.tab === 'gallery') loadGallery();
+});
+
+async function loadToday() {
+  const data = await (await fetch('/api/today')).json();
+  const list = $('#speciesList');
+  if (!data.species.length) {
+    list.innerHTML = '<div class="empty">No birds heard yet today. Listening…</div>';
+    return;
+  }
+  list.innerHTML = data.species.map(s => `
+    <div class="card"><div class="row">
+      <div><div class="name">${s.common_name}</div>
+        <div class="sci">${s.scientific_name}</div></div>
+      <div style="text-align:right">
+        <div class="count">${s.count}</div>
+        <div class="times">${s.first_heard}–${s.last_heard}</div>
+      </div>
+    </div></div>`).join('');
+}
+
+async function loadGallery() {
+  const data = await (await fetch('/api/history')).json();
+  const grid = $('#galleryGrid');
+  if (!data.images.length) {
+    grid.innerHTML = '<div class="empty">No pictures yet. Hit “Post now”.</div>';
+    return;
+  }
+  grid.innerHTML = data.images.map(i => `
+    <figure>
+      <img src="/api/image/${i.id}" alt="${i.style}" loading="lazy">
+      <figcaption>${i.generated_at.slice(0,10)} · ${i.style}<br>
+        <button class="btn ghost" onclick="repost(${i.id})">Re-post</button>
+      </figcaption>
+    </figure>`).join('');
+}
+
+async function postNow() {
+  const btn = $('#postNow');
+  btn.disabled = true; $('#status').textContent = 'Painting the day’s birds…';
+  try {
+    const r = await (await fetch('/api/post-now', {method:'POST'})).json();
+    $('#status').textContent = 'Frame: ' + r.publish + (r.detail ? ' — ' + r.detail : '');
+  } catch (e) { $('#status').textContent = 'Error: ' + e; }
+  btn.disabled = false;
+}
+
+async function repost(id) {
+  $('#status') && ($('#status').textContent = '');
+  const r = await (await fetch('/api/repost/' + id, {method:'POST'})).json();
+  alert('Re-post: ' + r.publish + (r.detail ? ' — ' + r.detail : ''));
+}
+
+$('#postNow').onclick = postNow;
+loadToday();
+setInterval(loadToday, 30000);
+</script>
+</body>
+</html>

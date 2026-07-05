@@ -1,0 +1,52 @@
+"""Publish the day's picture to the shared Inky Frame. Never fight the frame."""
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass
+from typing import Callable
+
+import httpx
+
+
+@dataclass
+class PublishResult:
+    status: str  # posted | held | unreachable
+    detail: str = ""
+
+
+def _default_post(url, files, data, timeout):
+    return httpx.post(url, files=files, data=data, timeout=timeout)
+
+
+class Publisher:
+    def __init__(self, frame_url: str, hold_minutes: int, saturation: float,
+                 http_post: Callable = _default_post, max_retries: int = 3,
+                 backoff: float = 5.0, timeout: float = 60.0):
+        self.frame_url = frame_url.rstrip("/")
+        self.hold_minutes = hold_minutes
+        self.saturation = saturation
+        self.http_post = http_post
+        self.max_retries = max_retries
+        self.backoff = backoff
+        self.timeout = timeout
+
+    def publish(self, png_bytes: bytes) -> PublishResult:
+        url = f"{self.frame_url}/display"
+        data = {"source": "birdframe", "hold_minutes": self.hold_minutes,
+                "saturation": self.saturation}
+        last = ""
+        for attempt in range(self.max_retries):
+            try:
+                files = {"file": ("birdframe.png", png_bytes, "image/png")}
+                resp = self.http_post(url, files, data, self.timeout)
+                if resp.status_code in (200, 202):
+                    return PublishResult("posted")
+                if resp.status_code == 409:
+                    # Someone else is holding the frame — leave it be.
+                    return PublishResult("held", "frame held by another source")
+                last = f"HTTP {resp.status_code}"
+            except Exception as exc:
+                last = str(exc)
+            if attempt < self.max_retries - 1:
+                time.sleep(self.backoff * (attempt + 1))
+        return PublishResult("unreachable", last)
