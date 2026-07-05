@@ -192,6 +192,10 @@ def create_app(ctx: AppContext) -> FastAPI:
         def _run():
             try:
                 rec = ctx.artist.generate(now, force_paid=True, species_days=species)
+                if rec is None:
+                    with _capture["lock"]:
+                        _capture.update(state="empty", species=[])
+                    return
                 with _capture["lock"]:
                     if _capture["cancel"]:
                         _capture.update(state="cancelled", species=rec.species)
@@ -275,6 +279,8 @@ def create_app(ctx: AppContext) -> FastAPI:
     def post_now():
         # Explicit user action → force a real (paid) image and override any hold.
         rec = ctx.artist.generate(ctx.now(), force_paid=True)
+        if rec is None:
+            return {"skipped": True, "reason": "no birds heard today yet — nothing to picture"}
         result = _publish(ctx, rec, force=True)
         return {"image_id": rec.id, "publish": result.status, "detail": result.detail}
 

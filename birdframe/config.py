@@ -23,7 +23,7 @@ DEFAULTS = {
     "live_window_start": "08:00",
     "live_window_end": "22:00",
     "frame_url": "http://pi-inky-impression.local:5000",
-    "frame_hold_minutes": 180,
+    "frame_hold_minutes": 0,       # 0 = don't hold the shared frame (a hold also blocks birdframe's own next post)
     "frame_saturation": 0.6,
     "style_mode": "rotate",        # rotate | pinned
     "pinned_style": "",

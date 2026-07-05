@@ -379,6 +379,7 @@ async function capture() {
     b.dataset.state = ''; b.textContent = "Capture what's heard now"; b.classList.remove('stopping');
     if (st.state === 'done') $('#captureStatus').textContent = `Captured ${esc((st.species||[]).join(', ')||'a quiet moment')} — frame: ${st.result}.`;
     else if (st.state === 'cancelled') $('#captureStatus').textContent = 'Capture stopped — nothing sent to the frame.';
+    else if (st.state === 'empty') $('#captureStatus').textContent = 'Nothing heard right now — nothing captured.';
     else $('#captureStatus').textContent = 'Error: ' + (st.result||'capture failed');
   }, 2000);
 }

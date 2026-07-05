@@ -50,14 +50,26 @@ def test_generate_falls_back_to_poster_on_openai_error(tmp_path, mocker):
     assert rec.style.endswith("(fallback)")
 
 
-def test_no_birds_does_not_spend_and_uses_free_poster(tmp_path, mocker):
+def test_no_birds_returns_none_no_empty_image(tmp_path, mocker):
     client = mocker.Mock()
     client.generate.return_value = _png()
     store, artist = _artist(tmp_path, client)  # no detections added
     rec = artist.generate(when=datetime(2026, 7, 5, 21))
-    client.generate.assert_not_called()          # no paid OpenAI call
-    assert rec.style.endswith("(fallback)")
-    assert Image.open(rec.path).size == (1200, 1600)
+    assert rec is None                            # empty → no image, nothing gallery'd
+    client.generate.assert_not_called()           # and no paid OpenAI call
+    assert store.recent_images() == []
+
+
+def test_unchanged_species_today_is_skipped(tmp_path, mocker):
+    client = mocker.Mock()
+    client.generate.return_value = _png()
+    store, artist = _artist(tmp_path, client)
+    store.add_detection(Detection(datetime(2026, 7, 5, 6), "Erithacus rubecula", "European Robin", 0.9))
+    first = artist.generate(when=datetime(2026, 7, 5, 12))
+    assert first is not None
+    again = artist.generate(when=datetime(2026, 7, 5, 13))  # same species, same day
+    assert again is None                          # nothing changed → not added again
+    assert len(store.recent_images()) == 1
 
 
 def test_no_mic_no_detections_is_free(tmp_path, mocker):
@@ -82,10 +94,14 @@ def test_daily_cap_limits_paid_calls(tmp_path, mocker):
 def test_force_paid_bypasses_threshold_and_cap(tmp_path, mocker):
     client = mocker.Mock()
     client.generate.return_value = _png()
-    store, artist = _artist(tmp_path, client, max_paid_images_per_day=1)
-    # No birds at all, and pretend the cap is already spent — Post Now still renders.
+    store, artist = _artist(tmp_path, client, max_paid_images_per_day=1,
+                            min_species_for_image=5)
+    # One bird (below the 5-species threshold) and the daily cap already spent —
+    # a forced Post Now must still render a real image.
+    store.add_image(datetime(2026, 7, 5, 9), "/tmp/x.png", "linocut", "p", ["Prior Bird"])
+    store.add_detection(Detection(datetime(2026, 7, 5, 6), "Erithacus rubecula", "European Robin", 0.9))
     rec = artist.generate(when=datetime(2026, 7, 5, 21), force_paid=True)
-    client.generate.assert_called_once()
+    client.generate.assert_called_once()          # spent despite threshold + cap
     assert rec.style == "ukiyo-e"
 
 

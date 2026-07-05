@@ -74,6 +74,8 @@ class Runtime:
     def post_now(self, when: datetime | None = None, force_paid: bool = False) -> str:
         when = when or self.now()
         rec = self.artist.generate(when, force_paid=force_paid)
+        if rec is None:
+            return "nothing to post"          # no birds, or nothing changed
         with open(rec.path, "rb") as fh:
             # An explicit user post (force_paid) also overrides any frame hold.
             result = self.publisher.publish(fh.read(), force=force_paid)
