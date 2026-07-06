@@ -76,8 +76,10 @@ class Detector:
         self._acoustic = birdnet.load("acoustic", "2.4", "tf")
         self._geo = birdnet.load("geo", "2.4", "tf")
         self.sample_rate = self._acoustic.get_sample_rate()
+        self._session = None
         self.whitelist = self._build_whitelist(latitude, longitude, geo_floor,
                                                 when or datetime.now())
+        self._open_session()
 
     def _build_whitelist(self, lat, lon, floor, when) -> set[str]:
         result = self._geo.predict(lat, lon, week=week_of_year(when))
@@ -86,20 +88,38 @@ class Detector:
         self.geo_by_scientific = {parse_species_name(n)[0]: conf for n, conf in pairs}
         return {name for name, conf in pairs if conf >= floor}
 
+    def _open_session(self) -> None:
+        """Hold ONE prediction session open and reuse it for every chunk.
+
+        Creating a fresh session per chunk (predict_arrays) spins up — and leaks
+        — multiprocessing semaphores/pipes each call; over hours that exhausts
+        the file-descriptor table (errno 24). A persistent session leaks nothing.
+        """
+        self._session = self._acoustic.predict_session(
+            custom_species_list=self.whitelist or None,
+            default_confidence_threshold=self.threshold, top_k=5)
+        self._session.__enter__()
+
+    def _close_session(self) -> None:
+        if self._session is not None:
+            try:
+                self._session.__exit__(None, None, None)
+            except Exception:
+                pass
+            self._session = None
+
     def refresh_whitelist(self, lat, lon, floor, when) -> None:
         self.whitelist = self._build_whitelist(lat, lon, floor, when)
+        # The species list is baked into the session, so rebuild it.
+        self._close_session()
+        self._open_session()
 
     def _extract(self, result) -> list[tuple[str, float]]:
         return _rows_to_pairs(result)
 
     def predict_chunk(self, audio: np.ndarray, sample_rate: int,
                       when: datetime) -> list[Detection]:
-        result = self._acoustic.predict_arrays(
-            (audio.astype(np.float32), sample_rate),
-            custom_species_list=self.whitelist or None,
-            default_confidence_threshold=self.threshold,
-            top_k=5,
-        )
+        result = self._session.run_arrays([(audio.astype(np.float32), sample_rate)])
         raw = self._extract(result)
         return filter_detections(raw, self.whitelist, self.threshold, when,
                                  blocklist=self.blocklist)

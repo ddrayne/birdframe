@@ -50,9 +50,9 @@ def test_predict_chunk_uses_model(mocker):
     fake_result.to_structured_array.return_value = [
         {"species_name": "Erithacus rubecula_European Robin", "confidence": 0.8},
     ]
-    det._acoustic = mocker.Mock()
-    det._acoustic.predict_arrays.return_value = fake_result
+    det._session = mocker.Mock()
+    det._session.run_arrays.return_value = fake_result
     det._extract = Detector._extract.__get__(det)
     out = det.predict_chunk(np.zeros(48000, dtype=np.float32), 48000, datetime(2026, 7, 5, 6))
     assert out[0].common_name == "European Robin"
-    det._acoustic.predict_arrays.assert_called_once()
+    det._session.run_arrays.assert_called_once()
