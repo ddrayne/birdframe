@@ -435,12 +435,16 @@ function birdLink(common, sci) {
 // ---- Tabs ----
 let activeTab = 'now';
 const TABS = ['now','today','census','gallery','styles','settings'];
-document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
-  activeTab = b.dataset.tab;
-  document.querySelectorAll('nav button').forEach(x => x.classList.toggle('active', x===b));
-  TABS.forEach(t => $('#'+t).hidden = activeTab!==t);
-  ({now:loadNow, today:loadToday, census:loadCensus, gallery:loadGallery, styles:loadStyles, settings:loadSettings}[activeTab])();
-});
+function showTab(tab) {
+  if (!TABS.includes(tab)) tab = 'now';
+  activeTab = tab;
+  document.querySelectorAll('nav button').forEach(x => x.classList.toggle('active', x.dataset.tab===tab));
+  TABS.forEach(t => $('#'+t).hidden = tab!==t);
+  if (location.hash.slice(1) !== tab) history.replaceState(null, '', '#'+tab);
+  ({now:loadNow, today:loadToday, census:loadCensus, gallery:loadGallery, styles:loadStyles, settings:loadSettings}[tab])();
+}
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
+window.addEventListener('hashchange', () => showTab(location.hash.slice(1)));
 
 // ---- Now ----
 let lastTop = null;
@@ -806,7 +810,7 @@ $('#previewStyle').onclick = previewStyle;
 $('#cancelStyle').onclick = loadStyles;
 $('#saveSettings').onclick = saveSettings;
 document.addEventListener('input', e => { if (['stylePrompt','styleAvoid'].includes(e.target.id)) updateAssembled(); });
-loadNow();
+showTab(location.hash.slice(1) || 'now');
 setInterval(() => { if (activeTab==='now') loadNow(); }, 4000);
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});
 </script>

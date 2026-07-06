@@ -11,6 +11,28 @@ dashboard, with a continuous *audio → BirdNET → SQLite → gpt-image → fra
 pipeline. Audio is analysed in memory and never written to disk (only short
 best-of clips per species are kept, so you can listen back).
 
+<p align="center">
+  <img src="docs/screenshots/artwork.png" alt="A day's birds painted as an Edinburgh scene" width="440">
+</p>
+
+<p align="center"><em>A day at the window, painted: blackbird, heron, song thrush,
+gull, curlew, greenfinch and dunnock over the Edinburgh skyline.</em></p>
+
+### The dashboard
+
+| Now — live listening | Census — your bird history |
+|---|---|
+| ![Now tab](docs/screenshots/now.png) | ![Census tab](docs/screenshots/census.png) |
+
+The **Now** view shows the most-recent bird with its reliability tier, a live
+detection feed with playable clips, and an activity sparkline. **Census** is
+your growing life list, all-time daily rhythm, and CSV export. The editable
+**Styles** library controls how each day is painted.
+
+<p align="center">
+  <img src="docs/screenshots/styles.png" alt="Styles editor" width="520">
+</p>
+
 ## What it does
 
 - **Listens continuously** and identifies birds, filtered to species plausible
@@ -100,3 +122,12 @@ BIRDFRAME_SMOKE=1 uv run pytest tests/test_smoke.py -s   # opt-in real-model che
 ```
 
 CI runs the suite on macOS via GitHub Actions.
+
+## License
+
+birdframe's code is [MIT-licensed](LICENSE). It builds on
+[BirdNET](https://github.com/birdnet-team/birdnet) (library MIT); note that the
+**BirdNET models** are licensed
+[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) —
+**non-commercial** use — so review those terms before any commercial use.
+Generated images are subject to your image provider's usage terms.
