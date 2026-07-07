@@ -126,12 +126,17 @@ def _notify_first_ever(common_name: str) -> None:
     _notify("New bird for your window! 🐦", f"First time hearing a {common_name}.")
 
 
+def _osa_quote(s: str) -> str:
+    """A safe AppleScript string literal (double-quoted, escaped)."""
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 def _notify(title: str, message: str) -> None:
     try:
-        subprocess.run(
-            ["osascript", "-e",
-             f'display notification {message!r} with title {title!r} sound name "Glass"'],
-            check=False, timeout=5)
+        script = (f"display notification {_osa_quote(message)} "
+                  f"with title {_osa_quote(title)} sound name \"Glass\"")
+        subprocess.run(["osascript", "-e", script], check=False, timeout=5,
+                       capture_output=True)  # don't spam osascript errors into the log
     except Exception as exc:  # notifications are best-effort
         log.debug("notification failed: %s", exc)
 

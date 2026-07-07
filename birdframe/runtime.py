@@ -31,6 +31,7 @@ class Runtime:
         self.status = "starting"
         self._seen_today: set[str] = set()
         self._today = now().date()
+        self._started = now()
         self._lock = threading.Lock()
 
     @classmethod
@@ -51,8 +52,19 @@ class Runtime:
         rt.status = "starting"
         rt._seen_today = set()
         rt._today = now().date()
+        rt._started = now()
         rt._lock = threading.Lock()
         return rt
+
+    def should_restart_for_freshness(self, now: datetime) -> bool:
+        """True once a day at the configured quiet hour, after a few hours up —
+        a clean self-restart bounds any slow resource creep (memory, TF state).
+        The LaunchAgent brings it right back."""
+        hour = getattr(self.config, "daily_restart_hour", -1)
+        if hour is None or hour < 0:
+            return False
+        up_hours = (now - self._started).total_seconds() / 3600
+        return now.hour == hour and up_hours >= 3
 
     def on_chunk(self, audio, when: datetime) -> None:
         self.roll_day(when)

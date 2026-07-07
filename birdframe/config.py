@@ -33,6 +33,7 @@ DEFAULTS = {
     "max_paid_images_per_day": 1,  # hard cap on paid gpt-image-1 calls per day
     "capture_window_minutes": 60,  # 'capture current birds' looks back this far
     "archive_keep_days": 0,        # prune generated images older than this (0 = keep all)
+    "daily_restart_hour": 4,       # self-restart at this hour to bound resource creep (-1 = never)
     "min_species_confidence": 0.0,   # hard hide floor; 0 = show everything, marked by reliability tier
     "dashboard_port": 8355,
 }
@@ -64,6 +65,7 @@ class Config:
     max_paid_images_per_day: int
     capture_window_minutes: int
     archive_keep_days: int
+    daily_restart_hour: int
     min_species_confidence: float
     dashboard_port: int
     path: Path = DEFAULT_CONFIG_PATH

@@ -1,11 +1,14 @@
 """Publish the day's picture to the shared Inky Frame. Never fight the frame."""
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
 from typing import Callable
 
 import httpx
+
+log = logging.getLogger("birdframe")
 
 
 @dataclass
@@ -49,7 +52,10 @@ class Publisher:
                     return PublishResult("held", "frame held by another source")
                 last = f"HTTP {resp.status_code}"
             except Exception as exc:
-                last = str(exc)
+                last = f"{type(exc).__name__}: {exc}"
             if attempt < self.max_retries - 1:
                 time.sleep(self.backoff * (attempt + 1))
+        # Surface the failure — silent frame failures were undiagnosable before.
+        log.warning("Could not reach the frame at %s after %d tries: %s",
+                    url, self.max_retries, last)
         return PublishResult("unreachable", last)

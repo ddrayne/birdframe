@@ -28,6 +28,12 @@ class BirdframeMenuBar(rumps.App):
 
     def _tick(self, _):
         try:
+            import datetime as _dt
+            import os as _os
+            if self.runtime.should_restart_for_freshness(_dt.datetime.now()):
+                # A clean daily restart re-resolves the frame's mDNS name and
+                # bounds any slow resource creep. The LaunchAgent brings it back.
+                _os._exit(0)
             self.runtime.tick()
             species = self.runtime.species_today()
             n = len(species)

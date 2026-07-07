@@ -58,6 +58,29 @@ def test_saves_best_clip_and_notifies_first_ever(tmp_path):
     assert firsts == ["European Robin"]      # notified once, first-ever
 
 
+def test_should_restart_for_freshness(tmp_path):
+    from types import SimpleNamespace
+    store = Store(tmp_path / "db.sqlite")
+
+    class Det:
+        sample_rate = 48000
+
+        def predict_chunk(self, a, sr, w):
+            return []
+
+    rt = Runtime.for_test(store=store, detector=Det(), now=lambda: datetime(2026, 7, 8, 0))
+    rt.config = SimpleNamespace(daily_restart_hour=4)
+    rt._started = datetime(2026, 7, 8, 0)
+    assert rt.should_restart_for_freshness(datetime(2026, 7, 8, 4, 0)) is True   # 4am, up 4h
+    assert rt.should_restart_for_freshness(datetime(2026, 7, 8, 3, 0)) is False  # wrong hour
+    assert rt.should_restart_for_freshness(datetime(2026, 7, 8, 4, 0)) is True
+    rt._started = datetime(2026, 7, 8, 2, 30)                                    # up only 1.5h
+    assert rt.should_restart_for_freshness(datetime(2026, 7, 8, 4, 0)) is False
+    rt.config = SimpleNamespace(daily_restart_hour=-1)                           # disabled
+    rt._started = datetime(2026, 7, 8, 0)
+    assert rt.should_restart_for_freshness(datetime(2026, 7, 8, 4, 0)) is False
+
+
 def test_new_species_flag_resets_next_day(tmp_path):
     store = Store(tmp_path / "db.sqlite")
     det = FakeDetector([])

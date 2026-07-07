@@ -22,14 +22,19 @@ def _font(size: int):
     return ImageFont.load_default()
 
 
-def _fit_cover(img: Image.Image, w: int, h: int) -> Image.Image:
-    return ImageOps.fit(img.convert("RGB"), (w, h), method=Image.LANCZOS)
+def _fit_contain(img: Image.Image, w: int, h: int) -> Image.Image:
+    """Scale to fit *inside* w×h preserving aspect ratio — never crop, so no
+    bird or label is lost. Any leftover space becomes a border."""
+    img = img.convert("RGB")
+    img.thumbnail((w, h), Image.LANCZOS)
+    return img
 
 
 def compose_final(art_bytes: bytes, date: datetime, species: list[str]) -> bytes:
-    art = _fit_cover(Image.open(io.BytesIO(art_bytes)), FRAME_W, ART_H)
+    art = _fit_contain(Image.open(io.BytesIO(art_bytes)), FRAME_W, ART_H)
     canvas = Image.new("RGB", (FRAME_W, FRAME_H), (250, 248, 242))
-    canvas.paste(art, (0, 0))
+    # Centre the whole picture in the art area (letterboxed, never cropped).
+    canvas.paste(art, ((FRAME_W - art.width) // 2, (ART_H - art.height) // 2))
     draw = ImageDraw.Draw(canvas)
     date_str = _date_str(date)
     draw.text((30, ART_H + 18), date_str, fill=(30, 30, 30), font=_font(34))
