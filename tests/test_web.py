@@ -26,10 +26,13 @@ class FakeArtist:
         self.image_client = image_client
         self.styles = styles or []
 
-    def generate(self, when, force_paid=False, species_days=None):
+    def generate(self, when, force_paid=False, species_days=None,
+                 style_name=None, force_new=False):
         self.calls += 1
         self.forced.append(force_paid)
         self.species_days_arg = species_days
+        self.style_name_arg = style_name
+        self.force_new_arg = force_new
         self.out_path.write_bytes(b"PNGBYTES")
         artist = self
         names = [s.common_name for s in species_days] if species_days is not None else ["European Robin"]
@@ -37,7 +40,7 @@ class FakeArtist:
         class R:
             id = 1
             path = str(artist.out_path)
-            style = "ukiyo-e"
+            style = style_name or "ukiyo-e"
             species = names
         return R()
 
@@ -321,3 +324,62 @@ def test_health_endpoint(tmp_path):
     assert "listening" in h and "openai_key_set" in h
     assert h["openai_key_set"] is False       # no image client in fixture
     assert "archive_bytes" in h and "species_today" in h
+
+
+def test_generate_creates_gallery_image_without_posting(tmp_path):
+    store, ctx, client = _client(tmp_path)
+    resp = client.post("/api/generate", json={"style": "linocut"})
+    assert resp.status_code == 200 and resp.json()["status"] == "started"
+    for _ in range(50):
+        st = client.get("/api/generate/status").json()
+        if st["state"] == "done":
+            break
+        time.sleep(0.02)
+    assert st["state"] == "done" and st["image_id"] == 1
+    assert ctx.artist.style_name_arg == "linocut"   # style threaded through
+    assert ctx.artist.force_new_arg is True          # fresh entry for the studio
+    assert ctx.publisher.published == []             # NOT posted to the frame
+
+
+def test_post_image_async_publishes_and_marks(tmp_path):
+    from datetime import datetime as _dt
+    store, ctx, client = _client(tmp_path)
+    img_id = store.add_image(_dt(2026, 7, 5, 12), str(tmp_path / "x.png"), "linocut", "p", ["Robin"])
+    (tmp_path / "x.png").write_bytes(b"PNG")
+    resp = client.post(f"/api/post/{img_id}")
+    assert resp.json()["status"] == "started"
+    for _ in range(50):
+        st = client.get("/api/post/status").json()
+        if st["state"] == "done":
+            break
+        time.sleep(0.02)
+    assert st["state"] == "done" and st["publish"] == "posted"
+    assert ctx.publisher.forced[-1] is True           # explicit post forces override
+    assert store.get_image(img_id).posted_at is not None
+
+
+def test_post_missing_image_404(tmp_path):
+    _, _, client = _client(tmp_path)
+    assert client.post("/api/post/999").status_code == 404
+
+
+def test_history_flags_on_frame(tmp_path):
+    from datetime import datetime as _dt
+    store, ctx, client = _client(tmp_path)
+    a = store.add_image(_dt(2026, 7, 5, 10), "/a.png", "s", "p", ["A"])
+    b = store.add_image(_dt(2026, 7, 5, 11), "/b.png", "s", "p", ["B"])
+    store.mark_posted(a, _dt(2026, 7, 5, 10, 5))
+    store.mark_posted(b, _dt(2026, 7, 5, 11, 5))       # b posted more recently
+    imgs = {i["id"]: i for i in client.get("/api/history").json()["images"]}
+    assert imgs[b]["on_frame"] is True
+    assert imgs[a]["on_frame"] is False
+
+
+def test_frame_status_proxy(tmp_path, mocker):
+    _, ctx, client = _client(tmp_path)
+    import birdframe.web.app as appmod
+    mocker.patch.object(appmod.__dict__.setdefault("httpx", __import__("httpx")), "get",
+                        return_value=mocker.Mock(status_code=200,
+                                                 json=lambda: {"busy": False, "source": "birdframe"}))
+    d = client.get("/api/frame/status").json()
+    assert d["reachable"] is True and d["source"] == "birdframe"

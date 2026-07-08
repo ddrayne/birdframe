@@ -18,7 +18,10 @@ class PublishResult:
 
 
 def _default_post(url, files, data, timeout):
-    return httpx.post(url, files=files, data=data, timeout=timeout)
+    # Fail fast if the frame can't be reached (unreachable/mDNS), but allow a
+    # long read — the Pi can take ~30s to answer while refreshing the e-ink.
+    t = httpx.Timeout(connect=6.0, read=timeout, write=timeout, pool=timeout)
+    return httpx.post(url, files=files, data=data, timeout=t)
 
 
 class Publisher:

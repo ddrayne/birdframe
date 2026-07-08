@@ -248,6 +248,18 @@
   .badge { background:var(--accent); color:var(--surface); border-radius:999px; padding:2px 9px;
     font-size:11.5px; margin-left:8px; font-weight:600; }
   .style-actions { display:flex; flex-wrap:wrap; gap:8px; }
+  .segmented { display:inline-flex; background:var(--surface-2); border:1px solid var(--line);
+    border-radius:999px; padding:3px; }
+  .segmented button { border:none; background:none; font:inherit; font-size:13.5px; color:var(--muted);
+    padding:6px 14px; border-radius:999px; cursor:pointer; }
+  .segmented button.active { background:var(--surface); color:var(--ink); box-shadow:var(--shadow); }
+  #studioStyle { font:inherit; padding:9px 11px; border:1px solid var(--line); border-radius:9px;
+    background:var(--surface-2); color:var(--ink); }
+  #genPreview img { max-width:300px; border-radius:11px; border:1px solid var(--line); margin-top:14px; }
+  figure.on-frame img { outline:2.5px solid var(--accent); outline-offset:2px; }
+  .frame-badge { display:inline-block; background:var(--accent); color:var(--surface);
+    border-radius:999px; padding:1px 8px; font-size:11px; font-weight:600; margin-left:6px; }
+  .gallery .send { width:100%; margin-top:2px; }
   textarea, .setfield input, .setfield select { width:100%; font:inherit; padding:9px 11px;
     border:1px solid var(--line); border-radius:9px; background:var(--surface-2); color:var(--ink);
     box-sizing:border-box; }
@@ -278,7 +290,7 @@
     <button data-tab="today">Today</button>
     <button data-tab="census">Census</button>
     <button data-tab="gallery">Gallery</button>
-    <button data-tab="styles">Styles</button>
+    <button data-tab="studio">Studio</button>
     <button data-tab="settings">Settings</button>
   </nav>
 </header>
@@ -306,7 +318,7 @@
 
   <section id="today" hidden>
     <div class="actionbar" style="justify-content:flex-start">
-      <button class="btn" id="postNow">Make today's picture</button>
+      <button class="btn" id="postNow">Generate today's picture</button>
       <span class="status" id="status"></span>
     </div>
     <p id="dayStory" class="daystory" hidden></p>
@@ -334,12 +346,32 @@
   </section>
 
   <section id="gallery" hidden>
+    <div class="actionbar" style="justify-content:space-between">
+      <div class="segmented" id="galleryFilter">
+        <button data-filter="all" class="active">All pictures</button>
+        <button data-filter="posted">Posted to frame</button>
+      </div>
+      <span class="status" id="sendStatus"></span>
+    </div>
     <div class="gallery" id="galleryGrid"></div>
   </section>
 
-  <section id="styles" hidden>
+  <section id="studio" hidden>
+    <div class="card" style="margin-bottom:22px">
+      <h3 class="mini">Make a picture</h3>
+      <p class="hint" style="margin:0 0 12px">Paint today's birds in any style — it lands in your
+        Gallery to review, and is <b>not</b> sent to the frame. Each is a real image (~2&nbsp;min).</p>
+      <div class="actionbar" style="justify-content:flex-start">
+        <select id="studioStyle" style="max-width:220px"></select>
+        <button class="btn" id="genBtn" type="button">Generate a picture</button>
+        <span class="status" id="genStatus"></span>
+      </div>
+      <div id="genPreview"></div>
+    </div>
+
+    <h3 class="mini" style="margin:0 0 10px">Styles — how pictures are painted</h3>
     <div class="actionbar" style="justify-content:flex-start">
-      <button class="btn" id="newStyle" type="button">New style</button>
+      <button class="btn ghost" id="newStyle" type="button">New style</button>
       <span class="status" id="stylesKeyNote"></span>
     </div>
     <div id="stylesList" class="stack"></div>
@@ -434,14 +466,14 @@ function birdLink(common, sci) {
 
 // ---- Tabs ----
 let activeTab = 'now';
-const TABS = ['now','today','census','gallery','styles','settings'];
+const TABS = ['now','today','census','gallery','studio','settings'];
 function showTab(tab) {
   if (!TABS.includes(tab)) tab = 'now';
   activeTab = tab;
   document.querySelectorAll('nav button').forEach(x => x.classList.toggle('active', x.dataset.tab===tab));
   TABS.forEach(t => $('#'+t).hidden = tab!==t);
   if (location.hash.slice(1) !== tab) history.replaceState(null, '', '#'+tab);
-  ({now:loadNow, today:loadToday, census:loadCensus, gallery:loadGallery, styles:loadStyles, settings:loadSettings}[tab])();
+  ({now:loadNow, today:loadToday, census:loadCensus, gallery:loadGallery, studio:loadStudio, settings:loadSettings}[tab])();
 }
 document.querySelectorAll('nav button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
 window.addEventListener('hashchange', () => showTab(location.hash.slice(1)));
@@ -573,26 +605,82 @@ async function blockSpecies(name) {
   loadToday(); if (activeTab==='now') loadNow();
 }
 async function postNow() {
-  const b = $('#postNow'); b.disabled = true; $('#status').textContent = 'Painting today’s birds…';
-  try { const r = await (await fetch('/api/post-now',{method:'POST'})).json();
-    $('#status').textContent = 'Frame: '+r.publish+(r.detail?' — '+r.detail:''); }
-  catch(e){ $('#status').textContent = 'Error: '+e; }
+  // "Generate today's picture" — makes a picture (no post) and shows it in the Gallery.
+  const b = $('#postNow'); b.disabled = true;
+  await generatePicture('', $('#status'), true);
   b.disabled = false;
 }
 
 // ---- Gallery ----
-let galleryImages = [];
+let galleryImages = [];      // filtered, as shown
+let galleryFilter = 'all';
 async function loadGallery() {
   const d = await (await fetch('/api/history')).json();
-  galleryImages = d.images;
-  $('#galleryGrid').innerHTML = d.images.length ? d.images.map((i,idx)=>`
-    <figure><img src="/api/image/${i.id}" loading="lazy" alt="${esc(i.style)}" onclick="openLightbox(${idx})">
-      <figcaption>${i.generated_at.slice(0,10)} · ${esc(i.style)}<br>
-        <button class="btn ghost small" onclick="repost(${i.id})">Re-post</button></figcaption>
-    </figure>`).join('') : '<div class="empty">No pictures yet. Capture some birds, or make today’s picture.</div>';
+  const all = d.images;
+  galleryImages = galleryFilter === 'posted' ? all.filter(i => i.posted_at) : all;
+  if (!galleryImages.length) {
+    $('#galleryGrid').innerHTML = `<div class="empty">${galleryFilter==='posted'
+      ? 'Nothing sent to the frame yet.' : 'No pictures yet — make one in the Studio.'}</div>`;
+    return;
+  }
+  $('#galleryGrid').innerHTML = galleryImages.map((i,idx)=>`
+    <figure class="${i.on_frame?'on-frame':''}">
+      <img src="/api/image/${i.id}" loading="lazy" alt="${esc(i.style)}" onclick="openLightbox(${idx})">
+      <figcaption>${i.generated_at.slice(0,10)} · ${esc(i.style)}
+        ${i.on_frame?'<span class="frame-badge" title="Currently displayed on the frame">on frame</span>':''}<br>
+        <button class="btn ghost small send" onclick="sendToFrame(${i.id}, this)">Send to frame</button></figcaption>
+    </figure>`).join('');
 }
-async function repost(id){ const r = await (await fetch('/api/repost/'+id,{method:'POST'})).json();
-  alert('Re-post: '+r.publish+(r.detail?' — '+r.detail:'')); }
+// filter toggle
+document.querySelectorAll('#galleryFilter button').forEach(b => b.onclick = () => {
+  galleryFilter = b.dataset.filter;
+  document.querySelectorAll('#galleryFilter button').forEach(x => x.classList.toggle('active', x===b));
+  loadGallery();
+});
+
+// Async send-to-frame with real e-ink progress (post job → frame /status poll).
+let sending = false;
+async function sendToFrame(id, btn) {
+  if (sending) return; sending = true;
+  // Write progress to whichever status element the user can see (lightbox or gallery).
+  const inLightbox = $('#lightbox').classList.contains('show');
+  const statusEl = (inLightbox && $('#lbSendStatus')) || $('#sendStatus');
+  const say = m => { statusEl.textContent = m; };
+  if (btn && btn.tagName === 'BUTTON') btn.disabled = true;
+  say('Sending to the frame…');
+  try {
+    const r = await (await fetch('/api/post/'+id, {method:'POST'})).json();
+    if (r.error) throw new Error(r.error);
+    await new Promise(res => {
+      const poll = setInterval(async () => {
+        const st = await (await fetch('/api/post/status')).json();
+        if (st.state === 'done') {
+          clearInterval(poll);
+          if (st.publish === 'posted') await waitForRefresh(say);
+          else if (st.publish === 'held') say('The frame is held by someone else.');
+          else say('Couldn’t reach the frame' + (st.detail?' — '+st.detail:'') + '.');
+          res();
+        } else if (st.state === 'error') { clearInterval(poll); say('Error: '+(st.detail||'failed')); res(); }
+      }, 1500);
+    });
+  } catch (e) { say('Error: ' + e.message); }
+  sending = false; if (btn && btn.tagName === 'BUTTON') btn.disabled = false;
+}
+async function waitForRefresh(say) {
+  const started = Date.now();
+  say('Refreshing the e-ink (~30s)…');
+  return new Promise(res => {
+    const poll = setInterval(async () => {
+      const secs = Math.round((Date.now()-started)/1000);
+      let f; try { f = await (await fetch('/api/frame/status')).json(); } catch { f = {}; }
+      if (f.reachable && f.busy === false && f.source === 'birdframe') {
+        clearInterval(poll); say('Shown on the frame ✓'); loadGallery(); res();
+      } else if (secs > 45) {   // accepted; e-ink refresh just takes a while
+        clearInterval(poll); say('Sent to the frame.'); loadGallery(); res();
+      } else say(`Refreshing the e-ink… ${secs}s`);
+    }, 2000);
+  });
+}
 
 // ---- Lightbox ----
 let lbIndex = -1;
@@ -611,11 +699,12 @@ function renderLightbox() {
   const i = galleryImages[lbIndex]; if (!i) return;
   $('#lbImg').src = '/api/image/' + i.id;
   const species = (i.species||[]).join(', ') || 'a quiet day';
-  const posted = i.posted_at ? ' · shown on the frame' : '';
+  const posted = i.on_frame ? ' · on the frame now' : (i.posted_at ? ' · previously posted' : '');
   $('#lbCaption').innerHTML = `
     <div class="lb-title">${i.generated_at.slice(0,10)} — ${esc(i.style)}</div>
     <div class="lb-sub">${esc(species)}${posted}</div>
-    <button class="btn small" onclick="repost(${i.id})">Re-post to frame</button>`;
+    <button class="btn small" onclick="sendToFrame(${i.id}, this)">Send to frame</button>
+    <span class="status" id="lbSendStatus" style="display:block;margin-top:6px"></span>`;
   const multi = galleryImages.length > 1;
   $('#lbPrev').style.display = multi ? '' : 'none';
   $('#lbNext').style.display = multi ? '' : 'none';
@@ -652,6 +741,48 @@ async function loadCensus() {
         <div class="first">first heard ${s.first_day} · heard ${s.total}× over ${s.days} day${s.days===1?'':'s'}</div></div>
       <div class="count" title="Times heard in total">${s.total}</div>
     </div>`).join('') : '<div class="empty">No history yet — birds will accumulate here over the days.</div>';
+}
+
+// ---- Studio (generate a picture + manage styles) ----
+async function loadStudio() {
+  await loadStyles();
+  // populate the Studio style picker from the loaded styles
+  $('#studioStyle').innerHTML = '<option value="">Auto (daily rotation)</option>' +
+    stylesData.styles.map(s=>`<option value="${esc(s.name)}">${esc(s.name)}</option>`).join('');
+  $('#genStatus').textContent = stylesData.key_set ? '' : 'Set an OpenAI key to generate pictures.';
+}
+
+// Generate a picture (no post). `toGallery` switches to the Gallery when done.
+let generating = false;
+async function generatePicture(style, statusEl, toGallery) {
+  if (generating) return; generating = true;
+  const started = Date.now();
+  statusEl.innerHTML = `${eq()} Painting…`;
+  try {
+    const r = await (await fetch('/api/generate', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({style: style||null})})).json();
+    if (r.status === 'running') { statusEl.textContent = 'Already painting one — hang on.'; generating=false; return; }
+    await new Promise(res => {
+      const poll = setInterval(async () => {
+        const st = await (await fetch('/api/generate/status')).json();
+        const secs = Math.round((Date.now()-started)/1000);
+        if (st.state === 'done') { clearInterval(poll);
+          statusEl.textContent = 'Done — added to the Gallery.';
+          if ($('#genPreview')) $('#genPreview').innerHTML = `<img src="/api/image/${st.image_id}?t=${Date.now()}" alt="new picture">`;
+          if (toGallery) showTab('gallery'); res();
+        } else if (st.state === 'empty') { clearInterval(poll); statusEl.textContent = 'No birds to picture right now.'; res(); }
+        else if (st.state === 'error') { clearInterval(poll); statusEl.textContent = 'Error: '+(st.result||'failed'); res(); }
+        else statusEl.innerHTML = `${eq()} Painting… ${secs}s`;
+      }, 2000);
+    });
+  } catch (e) { statusEl.textContent = 'Error: '+e; }
+  generating = false;
+}
+async function generateStudio() {
+  const b = $('#genBtn'); b.disabled = true;
+  await generatePicture($('#studioStyle').value, $('#genStatus'), false);
+  b.disabled = false;
+  loadGallery();   // refresh underlying gallery too
 }
 
 // ---- Styles ----
@@ -697,7 +828,7 @@ async function saveStyle() {
   const r = await fetch('/api/styles/'+encodeURIComponent(name||'style'),{method:'PUT',
     headers:{'Content-Type':'application/json'}, body:JSON.stringify({name, prompt, avoid:$('#styleAvoid').value})});
   const res = await r.json(); if(!r.ok){ $('#styleStatus').textContent='Error: '+res.error; return; }
-  loadStyles();
+  loadStudio();
 }
 async function previewStyle() {
   if (!stylesData.key_set){ $('#styleStatus').textContent='Set an OpenAI key first (birdframe set-key).'; return; }
@@ -723,10 +854,10 @@ async function previewStyle() {
     else $('#styleStatus').textContent=`Painting an example… ${secs}s`;
   }, 3000);
 }
-async function pinStyle(n){ await fetch('/api/styles/'+n+'/pin',{method:'POST'}); loadStyles(); }
-async function unpinStyle(){ await fetch('/api/styles/unpin',{method:'POST'}); loadStyles(); }
+async function pinStyle(n){ await fetch('/api/styles/'+n+'/pin',{method:'POST'}); loadStudio(); }
+async function unpinStyle(){ await fetch('/api/styles/unpin',{method:'POST'}); loadStudio(); }
 async function deleteStyle(n){ const r = await fetch('/api/styles/'+n,{method:'DELETE'});
-  if(!r.ok){ alert((await r.json()).error); return; } loadStyles(); }
+  if(!r.ok){ alert((await r.json()).error); return; } loadStudio(); }
 
 // ---- Settings ----
 const ENUMS = { post_mode:['daily','live','manual'], style_mode:['rotate','pinned'],
@@ -804,10 +935,11 @@ card.addEventListener('mouseenter', ()=>clearTimeout(cardTimer));
 // ---- Boot ----
 $('#captureBtn').onclick = capture;
 $('#postNow').onclick = postNow;
+$('#genBtn').onclick = generateStudio;
 $('#newStyle').onclick = () => openEditor(null);
 $('#saveStyle').onclick = saveStyle;
 $('#previewStyle').onclick = previewStyle;
-$('#cancelStyle').onclick = loadStyles;
+$('#cancelStyle').onclick = loadStudio;
 $('#saveSettings').onclick = saveSettings;
 document.addEventListener('input', e => { if (['stylePrompt','styleAvoid'].includes(e.target.id)) updateAssembled(); });
 showTab(location.hash.slice(1) || 'now');

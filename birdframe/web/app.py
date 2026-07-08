@@ -77,6 +77,11 @@ def create_app(ctx: AppContext) -> FastAPI:
 
     _capture = {"state": "idle", "cancel": False, "result": None,
                 "species": [], "lock": _threading.Lock()}
+    # Decoupled Studio jobs: generate a picture (no post) and post an existing one.
+    _generate = {"state": "idle", "result": None, "image_id": None,
+                 "species": [], "lock": _threading.Lock()}
+    _postjob = {"state": "idle", "publish": None, "detail": "", "image_id": None,
+                "lock": _threading.Lock()}
 
     @app.get("/")
     def index():
@@ -299,6 +304,93 @@ def create_app(ctx: AppContext) -> FastAPI:
             return {"state": _capture["state"], "result": _capture["result"],
                     "species": _capture["species"]}
 
+    # ---- Studio: generate a picture WITHOUT posting to the frame ----
+    @app.post("/api/generate")
+    async def generate(request: Request):
+        """Paint today's birds into a new gallery picture (optionally in a chosen
+        style), in the background. Does NOT post to the frame — that's a separate
+        explicit action."""
+        import threading
+        body = await request.body()
+        style = None
+        if body:
+            try:
+                style = (await request.json() or {}).get("style") or None
+            except Exception:
+                style = None
+        with _generate["lock"]:
+            if _generate["state"] == "running":
+                return {"status": "running"}
+            _generate.update(state="running", result=None, image_id=None, species=[])
+        now = ctx.now()
+
+        def _run():
+            try:
+                rec = ctx.artist.generate(now, force_paid=True, style_name=style,
+                                          force_new=True)
+                with _generate["lock"]:
+                    if rec is None:
+                        _generate.update(state="empty")
+                    else:
+                        _generate.update(state="done", image_id=rec.id, species=rec.species)
+            except Exception as exc:  # noqa: BLE001
+                with _generate["lock"]:
+                    _generate.update(state="error", result=str(exc))
+
+        threading.Thread(target=_run, daemon=True).start()
+        return {"status": "started", "style": style}
+
+    @app.get("/api/generate/status")
+    def generate_status():
+        with _generate["lock"]:
+            return {"state": _generate["state"], "image_id": _generate["image_id"],
+                    "species": _generate["species"], "result": _generate["result"]}
+
+    # ---- Post an existing gallery picture to the frame (async, so mobile/slow
+    # frames don't hang the request) ----
+    @app.post("/api/post/{image_id}")
+    def post_image(image_id: int):
+        import threading
+        rec = ctx.store.get_image(image_id)
+        if rec is None:
+            return JSONResponse({"error": "no such image"}, status_code=404)
+        with _postjob["lock"]:
+            if _postjob["state"] == "running":
+                return {"status": "running"}
+            _postjob.update(state="running", publish=None, detail="", image_id=image_id)
+
+        def _run():
+            try:
+                result = _publish(ctx, rec, force=True)
+                with _postjob["lock"]:
+                    _postjob.update(state="done", publish=result.status, detail=result.detail)
+            except Exception as exc:  # noqa: BLE001
+                with _postjob["lock"]:
+                    _postjob.update(state="error", publish="error", detail=str(exc))
+
+        threading.Thread(target=_run, daemon=True).start()
+        return {"status": "started", "image_id": image_id}
+
+    @app.get("/api/post/status")
+    def post_status():
+        with _postjob["lock"]:
+            return {"state": _postjob["state"], "publish": _postjob["publish"],
+                    "detail": _postjob["detail"], "image_id": _postjob["image_id"]}
+
+    @app.get("/api/frame/status")
+    def frame_status():
+        """Proxy the Inky Frame's own /status so the browser can show real e-ink
+        refresh progress after a post (busy / displayed_at / source)."""
+        import httpx
+        base = getattr(ctx.config, "frame_url", "").rstrip("/")
+        try:
+            r = httpx.get(f"{base}/status", timeout=4)
+            if r.status_code == 200:
+                return {"reachable": True, **r.json()}
+        except Exception:
+            pass
+        return {"reachable": False}
+
     @app.post("/api/block")
     async def block_species(request: Request):
         """Veto a species as 'not here': stop detecting it and purge its history."""
@@ -387,10 +479,14 @@ def create_app(ctx: AppContext) -> FastAPI:
     @app.get("/api/history")
     def history():
         rows = ctx.store.recent_images(limit=100)
+        # The most recently posted picture is the one currently on the frame.
+        posted = [r for r in rows if r.posted_at is not None]
+        on_frame_id = max(posted, key=lambda r: r.posted_at).id if posted else None
         return {"images": [
             {"id": r.id, "generated_at": r.generated_at.isoformat(), "style": r.style,
              "species": r.species,
-             "posted_at": r.posted_at.isoformat() if r.posted_at else None}
+             "posted_at": r.posted_at.isoformat() if r.posted_at else None,
+             "on_frame": r.id == on_frame_id}
             for r in rows
         ]}
 

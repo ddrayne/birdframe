@@ -26,6 +26,31 @@ def _artist(tmp_path, image_client, styles=None, **kw):
     return store, artist
 
 
+def test_style_name_override_and_force_new(tmp_path, mocker):
+    client = mocker.Mock()
+    client.generate.return_value = _png()
+    styles = [Style("ukiyo-e", "ukiyo of {scene}", ""), Style("linocut", "lino of {scene}", "")]
+    store, artist = _artist(tmp_path, client, styles=styles)
+    store.add_detection(Detection(datetime(2026, 7, 5, 6), "Erithacus rubecula", "European Robin", 0.9))
+    a = artist.generate(datetime(2026, 7, 5, 12), force_paid=True, style_name="linocut", force_new=True)
+    assert a.style == "linocut"
+    # a second forced generation with a different style makes a NEW gallery entry
+    # (same birds) instead of reusing the first — enabling style comparison
+    b = artist.generate(datetime(2026, 7, 5, 13), force_paid=True, style_name="ukiyo-e", force_new=True)
+    assert b.style == "ukiyo-e"
+    assert b.id != a.id
+    assert len(store.recent_images()) == 2
+
+
+def test_unknown_style_name_falls_back_to_rotation(tmp_path, mocker):
+    client = mocker.Mock()
+    client.generate.return_value = _png()
+    store, artist = _artist(tmp_path, client)  # only "ukiyo-e" exists
+    store.add_detection(Detection(datetime(2026, 7, 5, 6), "Erithacus rubecula", "European Robin", 0.9))
+    rec = artist.generate(datetime(2026, 7, 5, 12), force_paid=True, style_name="does-not-exist")
+    assert rec.style == "ukiyo-e"       # gracefully used the available style
+
+
 def test_generate_creates_image_record_and_file(tmp_path, mocker):
     client = mocker.Mock()
     client.generate.return_value = _png()
