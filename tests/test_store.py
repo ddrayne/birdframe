@@ -91,3 +91,30 @@ def test_image_record_roundtrip(tmp_path):
     assert img.posted_at is None
     s.mark_posted(img_id, datetime(2026, 7, 5, 21, 1))
     assert s.get_image(img_id).posted_at == datetime(2026, 7, 5, 21, 1)
+
+
+def test_life_list_has_time_of_day_and_peak(tmp_path):
+    s = Store(tmp_path / "db.sqlite")
+    s.add_detection(Detection(datetime(2026, 7, 5, 5, 2), "Erithacus rubecula", "European Robin", 0.9))
+    s.add_detection(Detection(datetime(2026, 7, 5, 5, 40), "Erithacus rubecula", "European Robin", 0.8))
+    s.add_detection(Detection(datetime(2026, 7, 5, 20, 10), "Erithacus rubecula", "European Robin", 0.7))
+    r = s.life_list()[0]
+    assert r["earliest"] == "05:02" and r["latest"] == "20:10"
+    assert r["peak_hour"] == 5      # 2 of 3 detections in the 05:00 hour
+
+
+def test_species_detail_and_activity_matrix(tmp_path):
+    s = Store(tmp_path / "db.sqlite")
+    for h in (5, 5, 6, 21):
+        s.add_detection(Detection(datetime(2026, 7, 5, h, 0), "Turdus merula", "Common Blackbird", 0.9))
+    s.add_detection(Detection(datetime(2026, 7, 6, 5, 0), "Turdus merula", "Common Blackbird", 0.8))
+    d = s.species_detail("Common Blackbird")
+    assert d["total"] == 5 and d["days"] == 2
+    assert d["hours"][5] == 3 and d["hours"][21] == 1
+    assert d["earliest"] == "05:00" and d["latest"] == "21:00"
+    assert [x["day"] for x in d["daily"]] == ["2026-07-05", "2026-07-06"]
+    assert s.species_detail("Nonexistent Bird") is None
+    m = s.activity_matrix(days=14)
+    assert {x["day"] for x in m} == {"2026-07-05", "2026-07-06"}
+    assert m[0]["hours"][5] == 2      # day 5 had two 05:00 detections
+    assert m[1]["hours"][5] == 1      # day 6 had one

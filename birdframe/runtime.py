@@ -28,6 +28,7 @@ class Runtime:
         self.new_species_today = False
         self.last_post: datetime | None = None
         self.last_detection_at: datetime | None = None
+        self._pending_post_id: int | None = None
         self.status = "starting"
         self._seen_today: set[str] = set()
         self._today = now().date()
@@ -49,6 +50,7 @@ class Runtime:
         rt.new_species_today = False
         rt.last_post = None
         rt.last_detection_at = None
+        rt._pending_post_id = None
         rt.status = "starting"
         rt._seen_today = set()
         rt._today = now().date()
@@ -125,6 +127,28 @@ class Runtime:
         now = now or self.now()
         if decide(self.scheduler_state(now), now):
             self.post_now(now)
+        else:
+            self.retry_pending_post(now)      # keep trying a frame that was down
+
+    def retry_pending_post(self, now: datetime | None = None) -> str | None:
+        """If an automatic post couldn't reach the frame, quietly retry it (on
+        each tick) until the frame reappears — so a dropped connection self-heals."""
+        pending = getattr(self, "_pending_post_id", None)
+        if pending is None:
+            return None
+        now = now or self.now()
+        rec = self.store.get_image(pending)
+        if rec is None:
+            self._pending_post_id = None
+            return None
+        with open(rec.path, "rb") as fh:
+            result = self.publisher.publish(fh.read(), force=True)
+        if result.status in ("posted", "held"):
+            if result.status == "posted":
+                self.store.mark_posted(rec.id, now)
+                self.notify("Picture posted 🐦", "The frame came back — today's picture is up.")
+            self._pending_post_id = None
+        return result.status
 
     def post_now(self, when: datetime | None = None, force_paid: bool = False) -> str:
         when = when or self.now()
@@ -136,9 +160,11 @@ class Runtime:
             result = self.publisher.publish(fh.read(), force=force_paid)
         if result.status == "posted":
             self.store.mark_posted(rec.id, when)
+            self._pending_post_id = None
         elif result.status == "unreachable":
+            self._pending_post_id = rec.id    # retry on later ticks until it lands
             self.notify("Couldn't reach the frame",
-                        "Today's picture is saved but the Inky Frame didn't answer.")
+                        "Today's picture is saved and will post itself when the frame returns.")
         self.last_post = when
         self.new_species_today = False
         return result.status

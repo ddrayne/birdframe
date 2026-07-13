@@ -58,6 +58,40 @@ def test_saves_best_clip_and_notifies_first_ever(tmp_path):
     assert firsts == ["European Robin"]      # notified once, first-ever
 
 
+def test_failed_post_retries_until_frame_returns(tmp_path):
+    from datetime import datetime as _dt
+    store = Store(tmp_path / "db.sqlite")
+    img = tmp_path / "pic.png"; img.write_bytes(b"PNG")
+    rec_id = store.add_image(_dt(2026, 7, 8, 21), str(img), "linocut", "p", ["Robin"])
+
+    class Art:
+        def generate(self, when, force_paid=False):
+            return store.get_image(rec_id)
+
+    class Pub:
+        def __init__(self): self.result = "unreachable"; self.calls = 0
+        def publish(self, png, force=False): self.calls += 1; return _R(self.result)
+
+    class _R:
+        def __init__(self, s): self.status = s; self.detail = ""
+
+    rt = Runtime.for_test(store=store, detector=None, now=lambda: _dt(2026, 7, 8, 21))
+    rt.artist, rt.publisher = Art(), Pub()
+    # scheduled post fails → becomes pending, not marked posted
+    rt.post_now(_dt(2026, 7, 8, 21))
+    assert rt._pending_post_id == rec_id
+    assert store.get_image(rec_id).posted_at is None
+    # a later tick retries; still down → stays pending
+    rt.publisher.result = "unreachable"
+    rt.retry_pending_post(_dt(2026, 7, 8, 21, 5))
+    assert rt._pending_post_id == rec_id
+    # frame returns → posts and clears the pending flag
+    rt.publisher.result = "posted"
+    rt.retry_pending_post(_dt(2026, 7, 8, 21, 10))
+    assert rt._pending_post_id is None
+    assert store.get_image(rec_id).posted_at is not None
+
+
 def test_should_restart_for_freshness(tmp_path):
     from types import SimpleNamespace
     store = Store(tmp_path / "db.sqlite")

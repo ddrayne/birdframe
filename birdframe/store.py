@@ -213,14 +213,71 @@ class Store:
             return cur.rowcount
 
     def life_list(self) -> list[dict]:
-        """Every species ever heard: first/last date, total count, best confidence."""
+        """Every species ever heard: first/last date, total count, best confidence,
+        earliest & latest time-of-day heard, and the hour it's most active."""
         rows = self._conn.execute(
             "SELECT common_name, scientific_name, MIN(day) AS first_day,"
             " MAX(day) AS last_day, COUNT(*) AS total, MAX(confidence) AS best,"
-            " COUNT(DISTINCT day) AS days"
+            " COUNT(DISTINCT day) AS days,"
+            " MIN(substr(ts, 12, 5)) AS earliest, MAX(substr(ts, 12, 5)) AS latest"
             " FROM detections GROUP BY common_name ORDER BY first_day, common_name"
         ).fetchall()
-        return [dict(r) for r in rows]
+        # peak hour per species (a small extra pass; datasets are modest)
+        peak = {}
+        for r in self._conn.execute(
+                "SELECT common_name, substr(ts,12,2) AS hh, COUNT(*) n"
+                " FROM detections GROUP BY common_name, hh").fetchall():
+            cur = peak.get(r["common_name"])
+            if cur is None or r["n"] > cur[1]:
+                peak[r["common_name"]] = (int(r["hh"]), r["n"])
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["peak_hour"] = peak.get(r["common_name"], (0, 0))[0]
+            out.append(d)
+        return out
+
+    def activity_matrix(self, days: int = 14) -> list[dict]:
+        """Recent day × hour detection counts — a heatmap of when the garden sings."""
+        recent_days = [r["day"] for r in self._conn.execute(
+            "SELECT DISTINCT day FROM detections ORDER BY day DESC LIMIT ?", (days,)).fetchall()]
+        recent_days = sorted(recent_days)
+        idx = {d: i for i, d in enumerate(recent_days)}
+        grid = [[0] * 24 for _ in recent_days]
+        if recent_days:
+            rows = self._conn.execute(
+                "SELECT day, substr(ts,12,2) AS hh, COUNT(*) n FROM detections"
+                " WHERE day >= ? GROUP BY day, hh", (recent_days[0],)).fetchall()
+            for r in rows:
+                if r["day"] in idx:
+                    grid[idx[r["day"]]][int(r["hh"])] += r["n"]
+        return [{"day": d, "hours": grid[i]} for i, d in enumerate(recent_days)]
+
+    def species_detail(self, common_name: str) -> dict | None:
+        """Everything about one species: its activity clock, span, and daily counts."""
+        rows = self._conn.execute(
+            "SELECT ts, day, confidence FROM detections WHERE common_name = ? ORDER BY ts",
+            (common_name,)).fetchall()
+        if not rows:
+            return None
+        hours = [0] * 24
+        daily: dict[str, int] = {}
+        for r in rows:
+            hours[int(r["ts"][11:13])] += 1
+            daily[r["day"]] = daily.get(r["day"], 0) + 1
+        sci = self._conn.execute(
+            "SELECT scientific_name FROM detections WHERE common_name=? LIMIT 1",
+            (common_name,)).fetchone()["scientific_name"]
+        return {
+            "common_name": common_name, "scientific_name": sci,
+            "total": len(rows), "days": len(daily),
+            "first_day": rows[0]["day"], "last_day": rows[-1]["day"],
+            "earliest": min(r["ts"][11:16] for r in rows),   # earliest time-of-day ever heard
+            "latest": max(r["ts"][11:16] for r in rows),     # latest time-of-day ever heard
+            "best_confidence": max(r["confidence"] for r in rows),
+            "hours": hours,
+            "daily": [{"day": d, "n": daily[d]} for d in sorted(daily)],
+        }
 
     def hour_histogram(self) -> list[int]:
         """All-time detection counts by hour of day (0–23) — the daily rhythm."""

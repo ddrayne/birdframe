@@ -277,6 +277,64 @@
   .setfield label { flex:1; text-transform:capitalize; }
   .setfield input, .setfield select { max-width:210px; }
   :focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:6px; }
+  /* ---- Census dashboard ---- */
+  .census2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px; }
+  @media (max-width:720px){ .census2 { grid-template-columns:1fr; } }
+  #rhythmClock { display:flex; justify-content:center; padding:6px 0; }
+  #rhythmClock svg { width:100%; max-width:300px; height:auto; }
+  .clock-hub { fill:var(--muted); font:600 13px var(--sans); text-anchor:middle; }
+  .rclock { display:block; margin:0 auto; }
+  .clk-big { fill:var(--ink); font:600 19px var(--serif); }
+  .clk-sub { fill:var(--accent); font:600 13px var(--mono); }
+  #rhythmClock { flex-direction:column; }
+  .rboard-row { display:flex; align-items:center; gap:10px; padding:7px 0; border-bottom:1px solid var(--line);
+    cursor:pointer; }
+  .rboard-row:last-child { border-bottom:none; }
+  .rboard-row:hover { color:var(--accent); }
+  .rarity-dot { width:10px; height:10px; border-radius:50%; flex:none; }
+  .rboard-row .rr-name { flex:1; }
+  .rboard-row .rr-geo { font-family:var(--mono); font-size:12px; color:var(--muted); }
+  /* heatmap */
+  .heat { display:grid; gap:2px; overflow-x:auto; }
+  .heat-row { display:grid; grid-template-columns:64px repeat(24, 1fr); gap:2px; align-items:center; }
+  .heat-row .hl { font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .heat-cell { aspect-ratio:1; border-radius:2px; background:var(--surface-2); min-width:9px; }
+  .heat-axis { display:grid; grid-template-columns:64px repeat(24, 1fr); gap:2px; margin-top:4px; }
+  .heat-axis span { font-size:9px; color:var(--muted); text-align:center; }
+  /* species grid */
+  .species-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:12px; }
+  .sp-card { background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:13px 15px;
+    box-shadow:var(--shadow); cursor:pointer; transition:transform .1s, border-color .15s; }
+  .sp-card:hover { transform:translateY(-2px); border-color:var(--accent); }
+  .sp-card .sp-name { font-size:16px; font-weight:600; }
+  .sp-card .sp-sci { font-style:italic; color:var(--muted); font-size:12px; margin-bottom:8px; }
+  .sp-card .sp-meta { display:flex; justify-content:space-between; align-items:center; margin-top:8px;
+    font-size:12.5px; color:var(--muted); }
+  .sp-card .sp-count { font-family:var(--mono); color:var(--accent); font-weight:600; }
+  .miniclock { width:34px; height:34px; }
+  .rchip { font-size:11px; padding:2px 8px; border-radius:999px; font-weight:600; }
+  /* species deep-dive modal */
+  .modal { position:fixed; inset:0; z-index:120; display:flex; align-items:center; justify-content:center;
+    padding:18px; background:rgba(8,10,7,.86); backdrop-filter:blur(3px); opacity:0; pointer-events:none;
+    transition:opacity .18s; }
+  .modal.show { opacity:1; pointer-events:auto; }
+  .modal-card { background:var(--surface); border:1px solid var(--line); border-radius:16px;
+    max-width:560px; width:100%; max-height:90vh; overflow:auto; box-shadow:0 24px 70px rgba(0,0,0,.5); }
+  .modal-hero { display:flex; gap:16px; padding:20px; align-items:flex-start; }
+  .modal-hero img { width:120px; height:120px; object-fit:cover; border-radius:12px; flex:none; background:var(--surface-2); }
+  .modal-hero h2 { font-family:var(--serif); font-size:24px; margin:0; }
+  .modal-hero .sci { font-style:italic; color:var(--muted); margin-bottom:8px; }
+  .modal-extract { color:var(--muted); font-size:13.5px; line-height:1.5; }
+  .modal-body { padding:0 20px 20px; }
+  .rarity-meter { height:8px; border-radius:5px; background:linear-gradient(90deg,#A2432F,#B8860B,#2E9E6A);
+    position:relative; margin:6px 0 2px; }
+  .rarity-meter .pin { position:absolute; top:-3px; width:3px; height:14px; background:var(--ink);
+    border-radius:2px; transform:translateX(-50%); }
+  .factgrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:10px; margin:14px 0; }
+  .fact { background:var(--surface-2); border-radius:10px; padding:10px 12px; }
+  .fact .fv { font-family:var(--serif); font-size:20px; color:var(--ink); }
+  .fact .fl { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+  .modal-close { position:absolute; top:14px; right:14px; }
 </style>
 </head>
 <body>
@@ -334,15 +392,32 @@
 
   <section id="census" hidden>
     <div id="censusTotals" class="statsrow"></div>
+    <div class="census2">
+      <div class="card">
+        <h3 class="mini">When the garden sings <span class="hint">— all detections, around the 24-hour clock</span></h3>
+        <div id="rhythmClock"></div>
+      </div>
+      <div class="card">
+        <h3 class="mini">Unusual visitors <span class="hint">— rarest for this place, per BirdNET's range model</span></h3>
+        <div id="rarityBoard"></div>
+      </div>
+    </div>
     <div class="card" style="margin:16px 0">
-      <h3 class="mini">The daily rhythm — when birds sing (all time, by hour)</h3>
-      <div id="hourChart" class="hourchart"></div>
+      <h3 class="mini">Activity by day &amp; hour <span class="hint">— darker = more song; watch the dawn band</span></h3>
+      <div id="heatmap"></div>
     </div>
-    <div class="actionbar" style="justify-content:space-between; margin:0 0 10px">
-      <h3 class="mini" style="margin:0">Life list — every species heard here</h3>
-      <a class="btn ghost small" href="/api/export.csv">Export CSV</a>
+    <div class="actionbar" style="justify-content:space-between; margin:0 0 12px; flex-wrap:wrap; gap:10px">
+      <h3 class="mini" style="margin:0">The species — <span id="speciesCount"></span></h3>
+      <div style="display:flex; gap:10px; align-items:center">
+        <div class="segmented" id="speciesSort">
+          <button data-sort="count" class="active">Most vocal</button>
+          <button data-sort="rarity">Rarest</button>
+          <button data-sort="recent">Newest</button>
+        </div>
+        <a class="btn ghost small" href="/api/export.csv">Export CSV</a>
+      </div>
     </div>
-    <div class="card"><div id="lifeList" class="stack"></div></div>
+    <div id="speciesGrid" class="species-grid"></div>
   </section>
 
   <section id="gallery" hidden>
@@ -409,6 +484,10 @@
 </main>
 
 <div id="birdcard"></div>
+
+<div id="speciesModal" class="modal" aria-hidden="true">
+  <div class="modal-card" id="speciesCard"></div>
+</div>
 
 <div id="lightbox" class="lightbox" aria-hidden="true">
   <button class="lb-btn lb-close" id="lbClose" aria-label="Close">✕</button>
@@ -720,28 +799,172 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'ArrowRight') stepLightbox(1);
 });
 
-// ---- Census / history ----
+// ---- Census dashboard ----
+let censusData = null;
+
+// An analog-clock-style rhythm dial: 12 at top like a real clock, with AM on the
+// inner ring and PM on the outer ring. Hover any hour to read its count.
+const clockData = {};   // id -> {hours, peak, unit}
+function fmtHour(h){ const ap=h<12?'am':'pm', hr=h%12||12; return `${hr}${ap}`; }
+function radialClock(hours, {size=280, id='clk', labels=true, unit='detections'}={}) {
+  const cx=size/2, cy=size/2, max=Math.max(1,...hours);
+  const hub=size*0.11;
+  const amR=[hub+size*0.03, size*0.235], pmR=[size*0.265, size/2-(labels?20:6)];
+  const peak=hours.indexOf(Math.max(...hours));
+  clockData[id] = {hours, peak, unit};
+  const seg = (h) => {
+    const v=hours[h], onClock=(h%12)/12, a=onClock*2*Math.PI - Math.PI/2;
+    const [r0,r1]= h<12?amR:pmR;
+    const len=r0+(v/max)*(r1-r0);
+    const w=size*0.028;
+    const x0=cx+Math.cos(a)*r0, y0=cy+Math.sin(a)*r0;
+    const x1=cx+Math.cos(a)*len, y1=cy+Math.sin(a)*len;
+    // wide invisible hit line for easy hover
+    const hx=cx+Math.cos(a)*r1, hy=cy+Math.sin(a)*r1;
+    return `<line x1="${x0.toFixed(1)}" y1="${y0.toFixed(1)}" x2="${x1.toFixed(1)}" y2="${y1.toFixed(1)}"
+        stroke="${h===peak?'var(--live)':'var(--accent)'}" stroke-width="${w}" stroke-linecap="round"
+        opacity="${(0.3+0.7*v/max).toFixed(2)}" data-seg="${h}"/>
+      <line x1="${x0.toFixed(1)}" y1="${y0.toFixed(1)}" x2="${hx.toFixed(1)}" y2="${hy.toFixed(1)}"
+        stroke="transparent" stroke-width="${size*0.05}" style="cursor:pointer"
+        onmouseover="clockHover('${id}',${h})" onmouseout="clockReset('${id}')"/>`;
+  };
+  const bars=[...Array(24)].map((_,h)=>seg(h)).join('');
+  const ticks = labels ? [[0,'12'],[3,'3'],[6,'6'],[9,'9']].map(([h,l])=>{
+    const a=(h/12)*2*Math.PI - Math.PI/2, rr=size/2-6;
+    return `<text x="${(cx+Math.cos(a)*rr).toFixed(1)}" y="${(cy+Math.sin(a)*rr+4).toFixed(1)}"
+      class="clock-hub" font-size="11">${l}</text>`;}).join('') : '';
+  return `<svg viewBox="0 0 ${size} ${size}" class="rclock">
+    <circle cx="${cx}" cy="${cy}" r="${amR[0]-3}" fill="none" stroke="var(--line)"/>
+    ${bars}${ticks}
+    <text x="${cx}" y="${cy-3}" text-anchor="middle" class="clk-big" id="${id}-h">${fmtHour(peak)}</text>
+    <text x="${cx}" y="${cy+14}" text-anchor="middle" class="clk-sub" id="${id}-v">${hours[peak].toLocaleString()}</text>
+  </svg>`;
+}
+function clockHover(id, h){
+  const d=clockData[id]; if(!d) return;
+  const el=document.getElementById(id+'-h'), ev=document.getElementById(id+'-v');
+  if(el) el.textContent=fmtHour(h);
+  if(ev) ev.textContent=d.hours[h].toLocaleString();
+  document.querySelectorAll(`.rclock [data-seg]`).forEach(s=>{});
+  const seg=document.querySelector(`#${id}-h`)?.closest('svg')?.querySelector(`[data-seg="${h}"]`);
+  if(seg){ seg.setAttribute('opacity','1'); seg.setAttribute('stroke','var(--live)'); }
+}
+function clockReset(id){
+  const d=clockData[id]; if(!d) return;
+  const el=document.getElementById(id+'-h'), ev=document.getElementById(id+'-v');
+  if(el) el.textContent=fmtHour(d.peak);
+  if(ev) ev.textContent=d.hours[d.peak].toLocaleString();
+  const svg=document.getElementById(id+'-h')?.closest('svg');
+  if(svg) svg.querySelectorAll('[data-seg]').forEach(s=>{
+    const h=+s.dataset.seg, v=d.hours[h], mx=Math.max(...d.hours);
+    s.setAttribute('opacity',(0.3+0.7*v/mx).toFixed(2));
+    s.setAttribute('stroke', h===d.peak?'var(--live)':'var(--accent)');
+  });
+}
+function rarityColor(geo){ return geo<0.06?'#A2432F':geo<0.12?'#B8860B':geo<0.30?'#9A6B12':'#2E9E6A'; }
+
 async function loadCensus() {
-  const d = await (await fetch('/api/census')).json();
+  const d = censusData = await (await fetch('/api/census')).json();
   const t = d.totals;
   $('#censusTotals').innerHTML = `
     <div class="stat" title="Distinct species heard here across all time"><div class="n">${t.species||0}</div><div class="l">species</div></div>
     <div class="stat" title="Total individual detections recorded"><div class="n">${(t.detections||0).toLocaleString()}</div><div class="l">detections</div></div>
     <div class="stat" title="Days on which at least one bird was heard"><div class="n">${t.days||0}</div><div class="l">days</div></div>
     <div class="stat" title="The first day birdframe heard anything"><div class="n">${t.since?t.since.slice(5):'—'}</div><div class="l">listening since</div></div>`;
-  const max = Math.max(1, ...d.hours);
-  $('#hourChart').innerHTML = d.hours.map((v,h)=>`
-    <div class="bar" style="height:${Math.round(v/max*100)}%"
-      title="${v} detection${v===1?'':'s'} around ${String(h).padStart(2,'0')}:00">
-      ${h%6===0?`<span>${h}</span>`:''}</div>`).join('');
-  $('#lifeList').innerHTML = d.life_list.length ? d.life_list.slice().reverse().map(s=>`
-    <div class="liferow">
-      <div><span>${birdLink(s.common_name, s.scientific_name)}</span>
-        <span class="tier tier-${s.tier}" title="Overall reliability across all time — ${s.reasons.join(', ')||'heard clearly'}">${s.tier}</span>
-        <div class="first">first heard ${s.first_day} · heard ${s.total}× over ${s.days} day${s.days===1?'':'s'}</div></div>
-      <div class="count" title="Times heard in total">${s.total}</div>
-    </div>`).join('') : '<div class="empty">No history yet — birds will accumulate here over the days.</div>';
+  $('#rhythmClock').innerHTML = radialClock(d.hours, {id:'rhythm'}) +
+    `<div class="spark-cap" style="width:100%;text-align:center">inner ring AM · outer ring PM · hover to explore</div>`;
+  // rarity board — rarest (lowest geo) species, most surprising first
+  const rare = d.life_list.slice().sort((a,b)=>a.geo-b.geo).slice(0,7);
+  $('#rarityBoard').innerHTML = rare.map(s=>`
+    <div class="rboard-row" onclick="openSpecies('${esc(s.common_name).replace(/'/g,"\\'")}')">
+      <span class="rarity-dot" style="background:${rarityColor(s.geo)}"></span>
+      <span class="rr-name">${esc(s.common_name)} <span class="tier tier-${s.tier}">${s.tier}</span></span>
+      <span class="rr-geo" title="range-model plausibility here">${s.rarity}</span>
+    </div>`).join('');
+  // heatmap day × hour
+  const hm = d.heatmap, hmax = Math.max(1, ...hm.flatMap(r=>r.hours));
+  $('#heatmap').innerHTML = `<div class="heat">` + hm.map(r=>`
+    <div class="heat-row"><span class="hl">${r.day.slice(5)}</span>` +
+    r.hours.map((v,h)=>`<div class="heat-cell" title="${r.day.slice(5)} ${String(h).padStart(2,'0')}:00 — ${v}"
+      style="background:${v?`color-mix(in srgb, var(--accent) ${Math.round(15+85*v/hmax)}%, var(--surface-2))`:'var(--surface-2)'}"></div>`).join('') +
+    `</div>`).join('') + `</div>
+    <div class="heat-axis"><span></span>${[...Array(24)].map((_,h)=>`<span>${h%3===0?h:''}</span>`).join('')}</div>`;
+  $('#speciesCount').textContent = `${d.life_list.length} heard here`;
+  renderSpeciesGrid('count');
 }
+let speciesSort = 'count';
+function renderSpeciesGrid(sort) {
+  speciesSort = sort;
+  document.querySelectorAll('#speciesSort button').forEach(b=>b.classList.toggle('active', b.dataset.sort===sort));
+  let list = censusData.life_list.slice();
+  if (sort==='count') list.sort((a,b)=>b.total-a.total);
+  else if (sort==='rarity') list.sort((a,b)=>a.geo-b.geo);
+  else list.sort((a,b)=>b.first_day.localeCompare(a.first_day) || b.total-a.total);
+  $('#speciesGrid').innerHTML = list.map(s=>{
+    // tiny activity clock: reconstruct from peak only isn't enough — use a chip instead
+    return `<div class="sp-card" onclick="openSpecies('${esc(s.common_name).replace(/'/g,"\\'")}')">
+      <div class="sp-name">${esc(s.common_name)}</div>
+      <div class="sp-sci">${esc(s.scientific_name)}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <span class="rchip" style="background:${rarityColor(s.geo)}22;color:${rarityColor(s.geo)}">${s.rarity}</span>
+        <span class="tier tier-${s.tier}">${s.tier}</span>
+      </div>
+      <div class="sp-meta">
+        <span title="Heard from ${s.earliest} to ${s.latest}; busiest around ${String(s.peak_hour).padStart(2,'0')}:00">
+          ${s.earliest}–${s.latest} · peak ${String(s.peak_hour).padStart(2,'0')}h</span>
+        <span class="sp-count" title="times heard">${s.total.toLocaleString()}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+document.querySelectorAll('#speciesSort button').forEach(b=>b.onclick=()=>renderSpeciesGrid(b.dataset.sort));
+
+// ---- Species deep-dive ----
+async function openSpecies(name) {
+  const modal = $('#speciesModal');
+  $('#speciesCard').innerHTML = '<div style="padding:40px;text-align:center;color:var(--muted)">Loading…</div>';
+  modal.classList.add('show'); modal.setAttribute('aria-hidden','false');
+  let d; try { d = await (await fetch('/api/species/'+encodeURIComponent(name))).json(); } catch { return; }
+  if (d.error) { $('#speciesCard').innerHTML = `<div style="padding:30px">Not found.</div>`; return; }
+  let wiki = {}; try { wiki = await (await fetch('/api/bird/'+encodeURIComponent(d.scientific_name))).json(); } catch {}
+  const geoPct = Math.round(Math.min(1, d.geo/0.6)*100);   // pin position on the rarity meter
+  const daily = d.daily.map(x=>x.n);
+  $('#speciesCard').innerHTML = `
+    <button class="btn ghost small modal-close" onclick="closeSpecies()">✕</button>
+    <div class="modal-hero">
+      ${wiki.thumbnail?`<img src="${wiki.thumbnail}" alt="">`:''}
+      <div>
+        <h2>${esc(d.common_name)}</h2>
+        <div class="sci">${esc(d.scientific_name)}
+          <span class="tier tier-${d.tier}">${d.tier}</span></div>
+        <div class="modal-extract">${esc((wiki.extract||'').slice(0,220))}${wiki.extract&&wiki.extract.length>220?'…':''}
+          ${wiki.url?`<a href="${wiki.url}" target="_blank" rel="noopener"> Wikipedia →</a>`:''}</div>
+      </div>
+    </div>
+    <div class="modal-body">
+      <h3 class="mini">How likely here <span class="hint">— BirdNET range model · ${esc(d.rarity)}${d.reasons.length?' · '+esc(d.reasons.join(', ')):''}</span></h3>
+      <div class="rarity-meter"><div class="pin" style="left:${geoPct}%"></div></div>
+      <div class="spark-cap" style="display:flex;justify-content:space-between"><span>very unusual</span><span>expected here</span></div>
+
+      <div class="factgrid">
+        <div class="fact"><div class="fv">${d.total.toLocaleString()}</div><div class="fl">times heard</div></div>
+        <div class="fact"><div class="fv">${d.days}</div><div class="fl">days</div></div>
+        <div class="fact"><div class="fv">${d.earliest}</div><div class="fl">earliest song</div></div>
+        <div class="fact"><div class="fv">${d.latest}</div><div class="fl">latest song</div></div>
+        <div class="fact"><div class="fv">${d.first_day.slice(5)}</div><div class="fl">first heard</div></div>
+        <div class="fact"><div class="fv">${d.best_confidence}</div><div class="fl">best confidence</div></div>
+      </div>
+
+      <div class="census2" style="grid-template-columns:1fr 1fr; align-items:center">
+        <div><h3 class="mini">When it sings</h3>${radialClock(d.hours,{size:200,id:'spclk',unit:'times'})}</div>
+        <div><h3 class="mini">Day by day</h3>${sparkline(daily.length>1?daily:[0,...daily])}
+          <div class="spark-cap">${d.daily[0].day.slice(5)} → ${d.daily[d.daily.length-1].day.slice(5)}</div></div>
+      </div>
+    </div>`;
+}
+function closeSpecies(){ const m=$('#speciesModal'); m.classList.remove('show'); m.setAttribute('aria-hidden','true'); }
+$('#speciesModal').addEventListener('click', e=>{ if(e.target.id==='speciesModal') closeSpecies(); });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape' && $('#speciesModal').classList.contains('show')) closeSpecies(); });
 
 // ---- Studio (generate a picture + manage styles) ----
 async function loadStudio() {

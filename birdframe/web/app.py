@@ -451,6 +451,10 @@ def create_app(ctx: AppContext) -> FastAPI:
             "post_mode": getattr(ctx.config, "post_mode", None),
         }
 
+    def _rarity_label(geo: float) -> str:
+        return ("very unusual here" if geo < 0.06 else "unusual here" if geo < 0.12
+                else "uncommon here" if geo < 0.30 else "common here")
+
     @app.get("/api/census")
     def census():
         from birdframe.reliability import GEO_DEFAULT, assess
@@ -462,10 +466,28 @@ def create_app(ctx: AppContext) -> FastAPI:
                 "common_name": r["common_name"], "scientific_name": r["scientific_name"],
                 "first_day": r["first_day"], "last_day": r["last_day"],
                 "total": r["total"], "days": r["days"], "best_confidence": round(r["best"], 2),
+                "earliest": r["earliest"], "latest": r["latest"], "peak_hour": r["peak_hour"],
                 "tier": a.tier, "reasons": a.reasons,
+                "geo": round(geo, 3), "rarity": _rarity_label(geo),
             })
         return {"totals": ctx.store.totals(), "life_list": entries,
-                "hours": ctx.store.hour_histogram(), "daily": ctx.store.daily_counts()}
+                "hours": ctx.store.hour_histogram(), "daily": ctx.store.daily_counts(),
+                "heatmap": ctx.store.activity_matrix(days=14)}
+
+    @app.get("/api/species/{common_name}")
+    def species_detail(common_name: str):
+        from birdframe.reliability import GEO_DEFAULT, assess
+        d = ctx.store.species_detail(common_name)
+        if d is None:
+            return JSONResponse({"error": "not heard here"}, status_code=404)
+        geo = (ctx.geo_lookup or {}).get(d["scientific_name"], GEO_DEFAULT)
+        a = assess(d["best_confidence"], geo, d["total"])
+        d["best_confidence"] = round(d["best_confidence"], 2)
+        d["geo"] = round(geo, 3)
+        d["rarity"] = _rarity_label(geo)
+        d["tier"] = a.tier
+        d["reasons"] = a.reasons
+        return d
 
     @app.get("/api/export.csv")
     def export_csv():
