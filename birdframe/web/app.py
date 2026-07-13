@@ -117,6 +117,14 @@ def create_app(ctx: AppContext) -> FastAPI:
         from fastapi.responses import Response
         return Response(_icon(192), media_type="image/png")
 
+    @app.get("/favicon.ico", include_in_schema=False)
+    def favicon():
+        # Browsers still probe this conventional path even when the PWA icon is
+        # declared. A small PNG response is widely supported and keeps the
+        # dashboard console free of a misleading 404.
+        from fastapi.responses import Response
+        return Response(_icon(32), media_type="image/png")
+
     @app.get("/icon-512.png")
     def icon512():
         from fastapi.responses import Response

@@ -103,6 +103,8 @@ def test_index_served(tmp_path):
     assert client.get("/").status_code == 200
     assert client.get("/static/app.css").status_code == 200
     assert client.get("/static/js/app.js").status_code == 200
+    favicon = client.get("/favicon.ico")
+    assert favicon.status_code == 200 and favicon.headers["content-type"] == "image/png"
 
 
 def test_now_endpoint_reports_latest_and_feed(tmp_path):
