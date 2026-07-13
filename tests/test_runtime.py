@@ -122,3 +122,17 @@ def test_new_species_flag_resets_next_day(tmp_path):
     rt.new_species_today = True
     rt.roll_day(datetime(2026, 7, 6, 0, 1))  # crosses midnight into a new day
     assert rt.new_species_today is False
+
+
+def test_runtime_ensures_one_daily_online_backup(tmp_path):
+    from types import SimpleNamespace
+    store = Store(tmp_path / "db.sqlite")
+    rt = Runtime.for_test(
+        store=store, detector=FakeDetector([]),
+        now=lambda: datetime(2026, 7, 13, 12))
+    rt.config = SimpleNamespace(backup_keep_days=30)
+    rt.backup_dir = tmp_path / "backups"
+    assert rt.ensure_backup(datetime(2026, 7, 13, 12)).exists()
+    assert len(list(rt.backup_dir.glob("*.sqlite"))) == 1
+    assert rt.ensure_backup(datetime(2026, 7, 13, 18)) is None
+    assert len(list(rt.backup_dir.glob("*.sqlite"))) == 1

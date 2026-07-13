@@ -22,6 +22,7 @@ EDITABLE_SETTINGS = [
     ("Posting", ["post_mode", "post_time"]),
     ("Live mode", ["live_min_gap_minutes", "live_window_start", "live_window_end"]),
     ("Cost controls", ["min_species_for_image", "max_paid_images_per_day"]),
+    ("Storage", ["backup_keep_days", "archive_keep_days"]),
     ("Live", ["capture_window_minutes"]),
     ("Frame", ["frame_url", "frame_hold_minutes", "frame_saturation"]),
     ("Style", ["style_mode", "pinned_style"]),
@@ -47,6 +48,7 @@ class AppContext:
     apply_settings: Callable[[], None] = None
     styles_dir: object = None
     preview_dir: object = None
+    backup_dir: object = None
     geo_lookup: object = None       # dict {scientific_name: plausibility} for reliability
     runtime: object = None          # live daemon state (health, listening status)
     text_client: object = None      # OpenAI client for the day-narration (or None)
@@ -518,6 +520,8 @@ def create_app(ctx: AppContext) -> FastAPI:
 
         listening = getattr(rt, "status", "unknown") if rt else "unknown"
         archive = ctx.artist.archive_dir if hasattr(ctx.artist, "archive_dir") else None
+        from birdframe.backups import backup_status
+        backups = backup_status(Path(ctx.backup_dir)) if ctx.backup_dir else None
         return {
             "listening": listening == "listening",
             "status": listening,
@@ -527,8 +531,20 @@ def create_app(ctx: AppContext) -> FastAPI:
             "whitelist_size": len(getattr(getattr(rt, "detector", None), "whitelist", []) or []),
             "openai_key_set": getattr(ctx.artist, "image_client", None) is not None,
             "archive_bytes": _dir_size(archive) if archive else 0,
+            "backup_count": backups.count if backups else 0,
+            "backup_latest": backups.latest if backups else None,
+            "backup_bytes": backups.bytes if backups else 0,
             "post_mode": getattr(ctx.config, "post_mode", None),
         }
+
+    @app.post("/api/backup")
+    def backup_now():
+        if not ctx.backup_dir:
+            return JSONResponse({"error": "backup directory is not configured"},
+                                status_code=503)
+        from birdframe.backups import create_manual_backup
+        path = create_manual_backup(ctx.store, Path(ctx.backup_dir), ctx.now())
+        return {"created": path.name, "bytes": path.stat().st_size}
 
     def _rarity_label(geo: float) -> str:
         return ("very unusual here" if geo < 0.06 else "unusual here" if geo < 0.12

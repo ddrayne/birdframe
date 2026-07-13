@@ -123,6 +123,18 @@ class Store:
                 if name not in image_columns:
                     self._conn.execute(f"ALTER TABLE images ADD COLUMN {name} {definition}")
 
+    def backup_to(self, path: Path) -> None:
+        """Write a transactionally consistent copy, including committed WAL data."""
+        destination = sqlite3.connect(str(path))
+        try:
+            with self._lock:
+                self._conn.backup(destination)
+            result = destination.execute("PRAGMA quick_check").fetchone()
+            if not result or result[0] != "ok":
+                raise sqlite3.DatabaseError("backup failed SQLite quick_check")
+        finally:
+            destination.close()
+
     def add_detection(self, det: Detection) -> None:
         with self._lock, self._conn:
             self._conn.execute(

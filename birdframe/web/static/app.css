@@ -464,7 +464,7 @@ select { cursor: pointer; }
 .editor input, .editor textarea { display: block; width: 100%; margin-top: 5px; }
 .editor label small { display: block; margin-top: 4px; color: var(--ink-faint); }
 
-.health-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 10px; }
+.health-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(150px,1fr)); gap: 10px; }
 .health-item { padding: 15px; }
 .health-item b { display: block; }
 .health-item span { color: var(--ink-faint); font-size: 11px; }

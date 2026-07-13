@@ -15,7 +15,7 @@ log = logging.getLogger("birdframe")
 class Runtime:
     def __init__(self, config, store, detector, artist, publisher,
                  now: Callable[[], datetime] = datetime.now,
-                 clips_dir=None, on_first_ever=None, notify=None):
+                 clips_dir=None, backup_dir=None, on_first_ever=None, notify=None):
         self.config = config
         self.store = store
         self.detector = detector
@@ -23,6 +23,7 @@ class Runtime:
         self.publisher = publisher
         self.now = now
         self.clips_dir = Path(clips_dir) if clips_dir else None
+        self.backup_dir = Path(backup_dir) if backup_dir else None
         self.on_first_ever = on_first_ever    # callback(common_name) for notifications
         self.notify = notify or (lambda title, msg: None)
         self.new_species_today = False
@@ -33,6 +34,7 @@ class Runtime:
         self._seen_today: set[str] = set()
         self._today = now().date()
         self._started = now()
+        self._last_backup_day = None
         self._lock = threading.Lock()
 
     @classmethod
@@ -45,6 +47,7 @@ class Runtime:
         rt.publisher = None
         rt.now = now
         rt.clips_dir = None
+        rt.backup_dir = None
         rt.on_first_ever = None
         rt.notify = lambda title, msg: None
         rt.new_species_today = False
@@ -55,6 +58,7 @@ class Runtime:
         rt._seen_today = set()
         rt._today = now().date()
         rt._started = now()
+        rt._last_backup_day = None
         rt._lock = threading.Lock()
         return rt
 
@@ -125,10 +129,32 @@ class Runtime:
     def tick(self, now: datetime | None = None) -> None:
         from birdframe.scheduler import decide
         now = now or self.now()
+        self.ensure_backup(now)
         if decide(self.scheduler_state(now), now):
             self.post_now(now)
         else:
             self.retry_pending_post(now)      # keep trying a frame that was down
+
+    def ensure_backup(self, now: datetime | None = None):
+        """Create at most one consistent database snapshot per calendar day."""
+        if self.backup_dir is None:
+            return None
+        now = now or self.now()
+        if self._last_backup_day == now.date():
+            return None
+        from birdframe.backups import create_daily_backup
+        try:
+            path, created = create_daily_backup(
+                self.store, self.backup_dir, now,
+                keep_days=getattr(self.config, "backup_keep_days", 30),
+            )
+            self._last_backup_day = now.date()
+            if created:
+                log.info("Database backup created: %s", path)
+            return path
+        except Exception as exc:
+            log.warning("Database backup failed: %s", exc)
+            return None
 
     def retry_pending_post(self, now: datetime | None = None) -> str | None:
         """If an automatic post couldn't reach the frame, quietly retry it (on

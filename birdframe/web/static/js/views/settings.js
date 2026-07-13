@@ -31,6 +31,7 @@ export async function renderSettings(token) {
   if (!routeIsCurrent(token)) return;
   setListening(health.listening, health.listening ? 'Listening' : health.status);
   const archiveMb = (health.archive_bytes / 1_048_576).toFixed(1);
+  const backupMb = (health.backup_bytes / 1_048_576).toFixed(1);
 
   app.innerHTML = `<article class="page">
     ${pageHeader('Care and feeding', 'Settings', 'The journal’s controls live away from the act of exploration. Detection history is never changed by ordinary settings edits.')}
@@ -40,7 +41,12 @@ export async function renderSettings(token) {
         ${healthItem(true, 'Last detection', ago(health.last_detection_ago_s))}
         ${healthItem(health.openai_key_set, 'Image artist', health.openai_key_set ? 'OpenAI key ready' : 'fallback poster mode')}
         ${healthItem(true, 'Local archive', `${archiveMb} MB`)}
+        ${healthItem(health.backup_count > 0, 'Database backups', health.backup_count ? health.backup_count + ' snapshots · ' + backupMb + ' MB' : 'first snapshot pending')}
       </div>
+    </section>
+
+    <section class="card card-pad" style="margin-top:18px"><div class="section-head" style="margin-top:0"><div><div class="eyebrow">Recovery</div><h2>Restore-ready database snapshots</h2><p>birdframe makes one consistent SQLite backup every day and keeps it for the configured retention period.</p></div></div>
+      <div class="button-row"><button type="button" class="btn secondary" id="backupNow">Back up now</button><span class="section-note" id="backupMessage">${health.backup_latest ? 'Latest: ' + esc(health.backup_latest) : 'No snapshot yet.'}</span></div>
     </section>
 
     <form id="settingsForm" style="margin-top:18px">
@@ -71,6 +77,16 @@ export async function renderSettings(token) {
       message.textContent = `Saved ${result.saved.length} settings${result.restart_required?.length ? ` · restart needed for ${result.restart_required.join(', ')}` : ''}.`;
       toast('Settings saved.');
     } catch (error) { message.textContent = error.message; }
+  });
+  document.querySelector('#backupNow').addEventListener('click', async event => {
+    const button = event.currentTarget, message = document.querySelector('#backupMessage');
+    button.disabled = true; message.textContent = 'Creating a consistent snapshot…';
+    try {
+      const result = await api('/api/backup', {method: 'POST'});
+      message.textContent = 'Created ' + result.created + ' · ' + (result.bytes / 1_048_576).toFixed(1) + ' MB';
+      toast('Database backup created.');
+    } catch (error) { message.textContent = error.message; }
+    finally { button.disabled = false; }
   });
   document.querySelector('#blockedList').addEventListener('click', async event => {
     const button = event.target.closest('[data-unblock]');

@@ -122,6 +122,18 @@ uv run birdframe make-app     # (re)create ~/Applications/Birdframe.app
 Logs: `~/Library/Logs/birdframe.log`. Data (SQLite, images, clips):
 `~/.local/share/birdframe/`. Settings: `~/.config/birdframe/config.toml`.
 
+birdframe creates a transactionally consistent SQLite snapshot every day under
+`~/.local/share/birdframe/backups/` and keeps 30 days by default. This uses
+SQLite's online backup API, so committed WAL data is included safely while the
+listener continues running. Use `uv run birdframe backup` or **Back up now** in
+Settings for an extra restore point; change `backup_keep_days` in Settings to
+adjust retention (0 keeps snapshots forever).
+
+To restore, stop birdframe first, preserve the current
+`birdframe.sqlite` under another name, copy the chosen snapshot into its
+place, and start birdframe again. Never replace the live database while the
+listener is running.
+
 ## Tips
 
 - Detection quality is capped by the microphone. Through double glazing it only

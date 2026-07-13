@@ -65,6 +65,16 @@ def _start_caffeinate() -> None:
 def build_runtime(config: Config) -> Runtime:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     store = Store(DATA_DIR / "birdframe.sqlite")
+    backup_dir = DATA_DIR / "backups"
+    from birdframe.backups import create_daily_backup
+    try:
+        path, created = create_daily_backup(
+            store, backup_dir, datetime.now(), config.backup_keep_days)
+        if created:
+            log.info("Database backup created: %s", path)
+    except Exception as exc:
+        # A backup problem must be visible, but must never stop listening.
+        log.warning("Database backup failed: %s", exc)
 
     from birdframe.detector import Detector
     log.info("Loading BirdNET models and building Edinburgh whitelist…")
@@ -102,7 +112,8 @@ def build_runtime(config: Config) -> Runtime:
     _prune_archive(DATA_DIR / "images", config)
     return Runtime(config=config, store=store, detector=detector,
                    artist=artist, publisher=publisher,
-                   clips_dir=DATA_DIR / "clips", on_first_ever=_notify_first_ever,
+                   clips_dir=DATA_DIR / "clips", backup_dir=backup_dir,
+                   on_first_ever=_notify_first_ever,
                    notify=_notify)
 
 
@@ -199,6 +210,7 @@ def _start_dashboard(runtime: Runtime, config: Config) -> None:
                      apply_settings=apply_settings,
                      styles_dir=DEFAULT_STYLES_DIR,
                      preview_dir=DATA_DIR / "style_previews",
+                     backup_dir=DATA_DIR / "backups",
                      geo_lookup=getattr(runtime.detector, "geo_by_scientific", {}),
                      runtime=runtime, text_client=text_client)
     app = create_app(ctx)
@@ -253,6 +265,16 @@ def _doctor() -> int:
     return 0
 
 
+def _backup_now() -> int:
+    """Create a manual restore point without loading BirdNET or the microphone."""
+    from birdframe.backups import create_manual_backup
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    store = Store(DATA_DIR / "birdframe.sqlite")
+    path = create_manual_backup(store, DATA_DIR / "backups", datetime.now())
+    print(f"Database backup created: {path}")
+    return 0
+
+
 _SERVICE_CMDS = {"install", "uninstall", "start", "stop", "restart", "status", "make-app", "logs"}
 
 
@@ -274,13 +296,16 @@ def main() -> None:
         raise SystemExit(_set_key_interactive())
     if argv and argv[0] == "doctor":
         raise SystemExit(_doctor())
+    if argv and argv[0] == "backup":
+        raise SystemExit(_backup_now())
     if argv and argv[0] in _SERVICE_CMDS:
         raise SystemExit(_run_service(argv[0]))
     if argv and argv[0] in ("-h", "--help"):
         print("Usage: birdframe [command]\n\n"
               "  (no args)  run the listener, menu bar, and dashboard in the foreground\n"
               "  set-key    store your OpenAI API key in the macOS Keychain\n"
-              "  doctor     check location, key, microphone and frame\n\n"
+              "  doctor     check location, key, microphone and frame\n"
+              "  backup     create a restore-ready database snapshot now\n\n"
               "Run it forever (background service):\n"
               "  install    start at login and keep running (LaunchAgent)\n"
               "  uninstall  remove the background service\n"

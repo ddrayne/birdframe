@@ -93,7 +93,8 @@ def _client(tmp_path, image_client=None):
                      artist=FakeArtist(tmp_path / "img.png", image_client=image_client),
                      publisher=FakePublisher(), now=lambda: datetime(2026, 7, 5, 12),
                      config=config, apply_settings=lambda: applied.append(True),
-                     styles_dir=styles_dir, preview_dir=tmp_path / "previews")
+                     styles_dir=styles_dir, preview_dir=tmp_path / "previews",
+                     backup_dir=tmp_path / "backups")
     ctx._applied = applied
     return store, ctx, TestClient(create_app(ctx))
 
@@ -398,6 +399,19 @@ def test_health_endpoint(tmp_path):
     assert "listening" in h and "openai_key_set" in h
     assert h["openai_key_set"] is False       # no image client in fixture
     assert "archive_bytes" in h and "species_today" in h
+    assert "backup_count" in h and "backup_latest" in h
+
+
+def test_manual_backup_endpoint_creates_restore_point(tmp_path):
+    _, _, client = _client(tmp_path)
+    response = client.post("/api/backup")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["created"].startswith("birdframe-2026-07-05-")
+    assert body["bytes"] > 0
+    health = client.get("/api/health").json()
+    assert health["backup_count"] == 1
+    assert health["backup_latest"] == body["created"]
 
 
 def test_generate_creates_gallery_image_without_posting(tmp_path):
