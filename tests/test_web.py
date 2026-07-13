@@ -375,6 +375,49 @@ def test_history_flags_on_frame(tmp_path):
     assert imgs[a]["on_frame"] is False
 
 
+def test_species_extra_reference_audio_and_range_map(tmp_path, mocker):
+    _, ctx, client = _client(tmp_path)
+
+    class Resp:
+        def __init__(self, data):
+            self.status_code = 200
+            self._data = data
+
+        def json(self):
+            return self._data
+
+    def fake_get(url, **kw):
+        if "page/summary/" in url:
+            return Resp({"title": "Common blackbird"})
+        if "page/media-list/" in url:
+            return Resp({"items": [
+                {"type": "image", "title": "File:Status_iucn_3.1_LC.svg"},   # filtered out
+                {"type": "audio", "title": "File:A_random_wingbeat.ogg"},
+                {"type": "audio", "title": "File:Common_Blackbird_song_(Turdus_merula).ogg"},
+                {"type": "image", "title": "File:Turdus_merula_distribution_map.png"},
+            ]})
+        if "api.gbif.org" in url:
+            return Resp({"usageKey": 2490719})
+        raise AssertionError("unexpected url " + url)
+
+    mocker.patch("httpx.get", side_effect=fake_get)
+    d = client.get("/api/species-extra/Turdus merula").json()
+    # prefers the 'song' recording over the earlier wingbeat clip
+    assert d["reference_audio"].endswith("Common_Blackbird_song_%28Turdus_merula%29.ogg")
+    assert d["reference_title"] == "Common Blackbird song (Turdus merula)"
+    # a real distribution map, not the IUCN status badge
+    assert d["range_map"].endswith("Turdus_merula_distribution_map.png?width=640")
+    assert d["gbif_url"] == "https://www.gbif.org/species/2490719"
+
+
+def test_species_extra_survives_missing_data(tmp_path, mocker):
+    _, ctx, client = _client(tmp_path)
+    mocker.patch("httpx.get", side_effect=RuntimeError("network down"))
+    d = client.get("/api/species-extra/Nonexistent species").json()
+    assert d == {"reference_audio": None, "reference_title": None,
+                 "range_map": None, "gbif_url": None}
+
+
 def test_frame_status_proxy(tmp_path, mocker):
     _, ctx, client = _client(tmp_path)
     import birdframe.web.app as appmod

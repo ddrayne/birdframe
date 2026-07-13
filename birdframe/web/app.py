@@ -149,6 +149,61 @@ def create_app(ctx: AppContext) -> FastAPI:
         _wiki_cache[key] = info
         return info
 
+    _extra_cache: dict[str, dict] = {}
+
+    @app.get("/api/species-extra/{scientific_name}")
+    def species_extra(scientific_name: str):
+        """A reference recording (Wikimedia Commons) and the global occurrence map
+        (GBIF) for a species — external, so you can compare against the real bird
+        and see where in the world it lives."""
+        import httpx
+        key = scientific_name.strip()
+        if key in _extra_cache:
+            return _extra_cache[key]
+        ua = {"User-Agent": "birdframe/1.0 (bird dashboard)"}
+        out = {"reference_audio": None, "reference_title": None,
+               "range_map": None, "gbif_url": None}
+        commons = "https://commons.wikimedia.org/wiki/Special:FilePath/"
+        # 1. reference song + distribution map from Wikipedia's media list
+        try:
+            title = key.replace(" ", "_")
+            s = httpx.get("https://en.wikipedia.org/api/rest_v1/page/summary/" + title,
+                          headers=ua, timeout=6, follow_redirects=True)
+            if s.status_code == 200:
+                title = s.json().get("title", key).replace(" ", "_")
+            ml = httpx.get("https://en.wikipedia.org/api/rest_v1/page/media-list/" + title,
+                           headers=ua, timeout=6, follow_redirects=True)
+            if ml.status_code == 200:
+                items = ml.json().get("items", [])
+                auds = [m for m in items if m.get("type") == "audio"]
+                auds.sort(key=lambda m: 0 if any(w in (m.get("title") or "").lower()
+                                                 for w in ("song", "call", "voice")) else 1)
+                if auds:
+                    fn = auds[0]["title"].split(":", 1)[-1]     # strip 'File:'
+                    out["reference_audio"] = commons + quote(fn)
+                    out["reference_title"] = fn.rsplit(".", 1)[0].replace("_", " ")
+                # a proper distribution/range map (not the IUCN status badge)
+                maps = [m for m in items if m.get("type") == "image"
+                        and any(w in (m.get("title") or "").lower()
+                                for w in ("distribution", "range", "_map."))
+                        and not any(w in (m.get("title") or "").lower()
+                                    for w in ("status", "iucn"))]
+                if maps:
+                    fn = maps[0]["title"].split(":", 1)[-1]
+                    out["range_map"] = commons + quote(fn) + "?width=640"
+        except Exception:
+            pass
+        # 2. link out to GBIF's global occurrence map
+        try:
+            m = httpx.get("https://api.gbif.org/v1/species/match",
+                          params={"name": key}, timeout=6).json()
+            if m.get("usageKey"):
+                out["gbif_url"] = f"https://www.gbif.org/species/{m['usageKey']}"
+        except Exception:
+            pass
+        _extra_cache[key] = out
+        return out
+
     def _conf_floor() -> float:
         return float(getattr(ctx.config, "min_species_confidence", 0.0) or 0.0)
 

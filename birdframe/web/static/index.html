@@ -7,6 +7,7 @@
 <meta name="theme-color" content="#2E6A4F">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="birdframe">
@@ -178,6 +179,19 @@
   .playclip:hover { background:var(--accent-soft); }
   .playclip.playing { background:var(--accent); color:var(--surface); animation:pulseclip 1s infinite; }
   @keyframes pulseclip { 0%,100%{transform:scale(1)} 50%{transform:scale(1.12)} }
+  /* Reference-vs-yours listen row + global range map (species deep-dive) */
+  .rec-compare { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin:14px 0 4px; }
+  .rec-lbl { font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
+  .rec-btn { display:inline-flex; align-items:center; gap:7px; min-height:36px; padding:6px 14px;
+    border:1px solid var(--accent); background:none; color:var(--accent); border-radius:20px;
+    font:inherit; font-size:13px; cursor:pointer; -webkit-tap-highlight-color:transparent; }
+  .rec-btn:hover { background:var(--accent-soft); }
+  .rec-btn.playing { background:var(--accent); color:var(--surface); }
+  .rec-btn .tri { font-size:10px; }
+  .rec-btn.playing .tri { animation:pulseclip 1s infinite; }
+  .rangewrap { border:1px solid var(--line); border-radius:12px; overflow:hidden;
+    background:var(--surface); margin:6px 0 4px; }
+  .rangemap { display:block; width:100%; height:auto; }
   .statsrow { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:12px; }
   .stat { background:var(--surface); border:1px solid var(--line); border-radius:12px;
     padding:14px 16px; box-shadow:var(--shadow); }
@@ -926,7 +940,10 @@ async function openSpecies(name) {
   modal.classList.add('show'); modal.setAttribute('aria-hidden','false');
   let d; try { d = await (await fetch('/api/species/'+encodeURIComponent(name))).json(); } catch { return; }
   if (d.error) { $('#speciesCard').innerHTML = `<div style="padding:30px">Not found.</div>`; return; }
-  let wiki = {}; try { wiki = await (await fetch('/api/bird/'+encodeURIComponent(d.scientific_name))).json(); } catch {}
+  const [wiki, extra] = await Promise.all([
+    fetch('/api/bird/'+encodeURIComponent(d.scientific_name)).then(r=>r.json()).catch(()=>({})),
+    fetch('/api/species-extra/'+encodeURIComponent(d.scientific_name)).then(r=>r.json()).catch(()=>({})),
+  ]);
   const geoPct = Math.round(Math.min(1, d.geo/0.6)*100);   // pin position on the rarity meter
   const daily = d.daily.map(x=>x.n);
   $('#speciesCard').innerHTML = `
@@ -942,6 +959,13 @@ async function openSpecies(name) {
       </div>
     </div>
     <div class="modal-body">
+      ${(d.clip_url||extra.reference_audio)?`
+      <div class="rec-compare">
+        <span class="rec-lbl">Listen</span>
+        ${d.clip_url?`<button class="rec-btn" onclick="playClip('${d.clip_url}', this)"><span class="tri">▶</span> your recording</button>`:''}
+        ${extra.reference_audio?`<button class="rec-btn" onclick="playClip('${extra.reference_audio}', this)" title="${esc(extra.reference_title||'reference recording')}"><span class="tri">▶</span> reference song</button>`:''}
+        ${extra.reference_audio?`<span class="hint">— compare against a clean library recording</span>`:''}
+      </div>`:''}
       <h3 class="mini">How likely here <span class="hint">— BirdNET range model · ${esc(d.rarity)}${d.reasons.length?' · '+esc(d.reasons.join(', ')):''}</span></h3>
       <div class="rarity-meter"><div class="pin" style="left:${geoPct}%"></div></div>
       <div class="spark-cap" style="display:flex;justify-content:space-between"><span>very unusual</span><span>expected here</span></div>
@@ -960,6 +984,15 @@ async function openSpecies(name) {
         <div><h3 class="mini">Day by day</h3>${sparkline(daily.length>1?daily:[0,...daily])}
           <div class="spark-cap">${d.daily[0].day.slice(5)} → ${d.daily[d.daily.length-1].day.slice(5)}</div></div>
       </div>
+
+      ${(extra.range_map||extra.gbif_url)?`
+      <h3 class="mini">Where in the world <span class="hint">— global range, not just this window</span></h3>
+      ${extra.range_map?`<div class="rangewrap"><img class="rangemap" loading="lazy" decoding="async"
+          src="${extra.range_map}" alt="Global distribution map for ${esc(d.common_name)}"></div>`:''}
+      <div class="spark-cap">
+        <span>${extra.range_map?'distribution map · Wikipedia':'range data'}</span>
+        ${extra.gbif_url?`<a href="${extra.gbif_url}" target="_blank" rel="noopener">live occurrence records · GBIF →</a>`:''}
+      </div>`:''}
     </div>`;
 }
 function closeSpecies(){ const m=$('#speciesModal'); m.classList.remove('show'); m.setAttribute('aria-hidden','true'); }
@@ -1166,7 +1199,18 @@ $('#cancelStyle').onclick = loadStudio;
 $('#saveSettings').onclick = saveSettings;
 document.addEventListener('input', e => { if (['stylePrompt','styleAvoid'].includes(e.target.id)) updateAssembled(); });
 showTab(location.hash.slice(1) || 'now');
-setInterval(() => { if (activeTab==='now') loadNow(); }, 4000);
+// Poll the live "Now" tab only while the page is actually visible — a hidden
+// tab (backgrounded app, locked phone) stops fetching, saving battery and data,
+// and refreshes instantly on return so it's never stale when you look back.
+let nowTimer = null;
+function pollNow(){ if (activeTab==='now' && !document.hidden) loadNow(); }
+function startPolling(){ if (!nowTimer) nowTimer = setInterval(pollNow, 4000); }
+function stopPolling(){ if (nowTimer) { clearInterval(nowTimer); nowTimer = null; } }
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) stopPolling();
+  else { if (activeTab==='now') loadNow(); startPolling(); }
+});
+startPolling();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});
 </script>
 </body>
