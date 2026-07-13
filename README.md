@@ -34,7 +34,12 @@ The dashboard is a personal field journal rather than a raw event monitor:
 - **Patterns** reveals the long view: volume, richness, unusual voices,
   day-by-hour heatmaps, and a searchable “soundscape score” showing when each
   species is active through the 24-hour day.
-- **Pictures** combines the artwork archive and editable style studio;
+- **Pictures** is a visual studio in three rooms: **Editions** preserves each
+  artwork with its exact prompt and the reason its style was chosen;
+  **Reimagine a day** can return to any listening date and reveal its acoustic
+  fingerprint before painting another interpretation; and the **Style
+  library** holds 21 editable, historically grounded and data-native
+  directions.
   **Settings** keeps health and configuration out of the journal itself.
 
 Charts expose exact counts and species composition on hover or tap. The full
@@ -52,8 +57,11 @@ discarding stored detections.
 - **Records a clip** of the best detection per species per day — press play and
   hear the actual bird (and tell real ones from a mishearing).
 - **Paints the day.** Once a day (or on demand) it composes the day's confident
-  birds into a picture with OpenAI gpt-image, in a rotating, fully editable art
-  style, captioned with the date and species, and posts it to the frame.
+  birds into a picture with OpenAI gpt-image. A responsive art director matches
+  the day's timing, richness, weather, balance, and first arrivals to one of 21
+  fully editable visual traditions; rotation and a pinned house style remain
+  available. Detection volume controls rhythm and density, never a fictional
+  count of individual birds.
 - **Builds a census.** A life list with first-heard dates, an all-time daily
   rhythm chart, totals, and CSV export.
 - **Tells the story.** A short LLM-written line about each day's birdsong.

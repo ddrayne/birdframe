@@ -81,7 +81,7 @@ def create_app(ctx: AppContext) -> FastAPI:
                 "species": [], "lock": _threading.Lock()}
     # Decoupled Studio jobs: generate a picture (no post) and post an existing one.
     _generate = {"state": "idle", "result": None, "image_id": None,
-                 "species": [], "lock": _threading.Lock()}
+                 "species": [], "day": None, "lock": _threading.Lock()}
     _postjob = {"state": "idle", "publish": None, "detail": "", "image_id": None,
                 "lock": _threading.Lock()}
 
@@ -372,27 +372,40 @@ def create_app(ctx: AppContext) -> FastAPI:
     # ---- Studio: generate a picture WITHOUT posting to the frame ----
     @app.post("/api/generate")
     async def generate(request: Request):
-        """Paint today's birds into a new gallery picture (optionally in a chosen
-        style), in the background. Does NOT post to the frame — that's a separate
-        explicit action."""
+        """Paint any recorded day, without posting it to the shared frame."""
         import threading
-        body = await request.body()
-        style = None
-        if body:
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        payload = payload or {}
+        style = payload.get("style") or None
+        day = payload.get("day") or None
+        created_at = ctx.now()
+        if day:
             try:
-                style = (await request.json() or {}).get("style") or None
-            except Exception:
-                style = None
+                source_when = datetime.strptime(day, "%Y-%m-%d").replace(hour=21)
+            except (TypeError, ValueError):
+                return JSONResponse({"error": "day must be YYYY-MM-DD"}, status_code=400)
+            if source_when.date() > created_at.date():
+                return JSONResponse({"error": "future days cannot be pictured yet"},
+                                    status_code=400)
+            if ctx.store.day_detail(day) is None:
+                return JSONResponse({"error": "no listening record for that day"},
+                                    status_code=404)
+        else:
+            source_when = created_at
+            day = source_when.strftime("%Y-%m-%d")
         with _generate["lock"]:
             if _generate["state"] == "running":
                 return {"status": "running"}
-            _generate.update(state="running", result=None, image_id=None, species=[])
-        now = ctx.now()
+            _generate.update(state="running", result=None, image_id=None,
+                             species=[], day=day)
 
         def _run():
             try:
-                rec = ctx.artist.generate(now, force_paid=True, style_name=style,
-                                          force_new=True)
+                rec = ctx.artist.generate(source_when, force_paid=True, style_name=style,
+                                          force_new=True, created_at=created_at)
                 with _generate["lock"]:
                     if rec is None:
                         _generate.update(state="empty")
@@ -403,13 +416,14 @@ def create_app(ctx: AppContext) -> FastAPI:
                     _generate.update(state="error", result=str(exc))
 
         threading.Thread(target=_run, daemon=True).start()
-        return {"status": "started", "style": style}
+        return {"status": "started", "style": style, "day": day}
 
     @app.get("/api/generate/status")
     def generate_status():
         with _generate["lock"]:
             return {"state": _generate["state"], "image_id": _generate["image_id"],
-                    "species": _generate["species"], "result": _generate["result"]}
+                    "species": _generate["species"], "result": _generate["result"],
+                    "day": _generate["day"]}
 
     # ---- Post an existing gallery picture to the frame (async, so mobile/slow
     # frames don't hang the request) ----
@@ -728,8 +742,10 @@ def create_app(ctx: AppContext) -> FastAPI:
         posted = [r for r in rows if r.posted_at is not None]
         on_frame_id = max(posted, key=lambda r: r.posted_at).id if posted else None
         return {"images": [
-            {"id": r.id, "generated_at": r.generated_at.isoformat(), "style": r.style,
-             "species": r.species,
+            {"id": r.id, "generated_at": r.generated_at.isoformat(),
+             "source_day": r.source_day or r.generated_at.strftime("%Y-%m-%d"),
+             "style": r.style, "style_reason": r.style_reason,
+             "art_profile": r.art_profile, "prompt": r.prompt, "species": r.species,
              "posted_at": r.posted_at.isoformat() if r.posted_at else None,
              "on_frame": r.id == on_frame_id}
             for r in rows
@@ -786,19 +802,44 @@ def create_app(ctx: AppContext) -> FastAPI:
             pp = _preview_path(s.name)
             items.append({
                 "name": s.name, "prompt": s.prompt, "avoid": s.avoid,
+                "collection": s.collection, "description": s.description,
+                "lineage": s.lineage, "medium": s.medium, "palette": s.palette,
+                "affinities": list(s.affinities), "source": s.source,
                 "pinned": _is_pinned(s.name),
                 "has_preview": bool(pp and pp.exists()),
                 "sample_prompt": build_prompt(s, stylemod.SAMPLE_SCENE),
             })
         return {"styles": items, "sample_scene": stylemod.SAMPLE_SCENE,
+                "mode": getattr(ctx.config, "style_mode", "responsive"),
                 "key_set": getattr(ctx.artist, "image_client", None) is not None}
+
+    @app.get("/api/art-direction/{day}")
+    def art_direction(day: str):
+        try:
+            when = datetime.strptime(day, "%Y-%m-%d").replace(hour=21)
+        except ValueError:
+            return JSONResponse({"error": "day must be YYYY-MM-DD"}, status_code=400)
+        if ctx.store.day_detail(day) is None:
+            return JSONResponse({"error": "no listening record for that day"},
+                                status_code=404)
+        direction = ctx.artist.art_direction(when)
+        direction["editions"] = [{
+            "id": image["id"], "style": image["style"],
+            "generated_at": image["generated_at"],
+        } for image in ctx.store.images_for_day(day)]
+        return direction
 
     @app.put("/api/styles/{name}")
     async def save_style_ep(name: str, request: Request):
         body = await request.json()
         try:
-            slug = stylemod.save_style(ctx.styles_dir, body.get("name", name),
-                                       body.get("prompt", ""), body.get("avoid", ""))
+            slug = stylemod.save_style(
+                ctx.styles_dir, body.get("name", name), body.get("prompt", ""),
+                body.get("avoid", ""), body.get("collection", "Uncategorised"),
+                body.get("description", ""), body.get("lineage", ""),
+                body.get("medium", ""), body.get("palette", ""),
+                body.get("affinities", ()), body.get("source", ""),
+            )
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
         _reload_styles()
@@ -829,11 +870,24 @@ def create_app(ctx: AppContext) -> FastAPI:
 
     @app.post("/api/styles/unpin")
     def unpin_style():
-        ctx.config.style_mode = "rotate"
+        ctx.config.style_mode = "responsive"
         ctx.config.save()
         if ctx.apply_settings:
             ctx.apply_settings()
-        return {"mode": "rotate"}
+        return {"mode": "responsive"}
+
+    @app.post("/api/styles/mode/{mode}")
+    def set_style_mode(mode: str):
+        if mode not in {"responsive", "rotate"}:
+            return JSONResponse({"error": "mode must be responsive or rotate"},
+                                status_code=400)
+        ctx.config.style_mode = mode
+        if mode != "pinned":
+            ctx.config.pinned_style = ""
+        ctx.config.save()
+        if ctx.apply_settings:
+            ctx.apply_settings()
+        return {"mode": mode}
 
     @app.post("/api/styles/{name}/preview")
     def make_preview(name: str):

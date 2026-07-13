@@ -25,7 +25,7 @@ DEFAULTS = {
     "frame_url": "http://pi-inky-impression.local:5000",
     "frame_hold_minutes": 0,       # 0 = don't hold the shared frame (a hold also blocks birdframe's own next post)
     "frame_saturation": 0.6,
-    "style_mode": "rotate",        # rotate | pinned
+    "style_mode": "responsive",    # responsive | rotate | pinned
     "pinned_style": "",
     "openai_model": "gpt-image-2",  # current flagship image model
     "image_quality": "high",

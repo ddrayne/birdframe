@@ -27,12 +27,14 @@ class FakeArtist:
         self.styles = styles or []
 
     def generate(self, when, force_paid=False, species_days=None,
-                 style_name=None, force_new=False):
+                 style_name=None, force_new=False, created_at=None):
         self.calls += 1
         self.forced.append(force_paid)
         self.species_days_arg = species_days
         self.style_name_arg = style_name
         self.force_new_arg = force_new
+        self.when_arg = when
+        self.created_at_arg = created_at
         self.out_path.write_bytes(b"PNGBYTES")
         artist = self
         names = [s.common_name for s in species_days] if species_days is not None else ["European Robin"]
@@ -43,6 +45,24 @@ class FakeArtist:
             style = style_name or "ukiyo-e"
             species = names
         return R()
+
+    def art_direction(self, when, species_days=None):
+        return {
+            "day": when.strftime("%Y-%m-%d"),
+            "profile": {
+                "species_count": 1, "detection_count": 1, "dominant_share": 1.0,
+                "evenness": 0, "hours": [0] * 6 + [1] + [0] * 17,
+                "dawn_share": 1.0, "dusk_share": 0, "night_share": 0,
+                "active_span_hours": 1, "debut_count": 1, "season": "summer",
+                "weather": "clear", "archetype": "Singular voice",
+                "tags": ["summer", "dawn-heavy"], "summary": "A singular dawn voice.",
+            },
+            "species": [{"common_name": "European Robin", "scientific_name": "Erithacus rubecula",
+                         "count": 1, "first_heard": "06:00", "last_heard": "06:00",
+                         "best_confidence": .9}],
+            "recommendations": [{"name": "ukiyo-e", "score": 10,
+                                 "matched": ["summer"], "reason": "It suits summer."}],
+        }
 
 
 class FakePublishResult:
@@ -233,7 +253,7 @@ def test_pin_and_unpin(tmp_path):
     assert ctx.config.style_mode == "pinned"
     assert ctx.config.pinned_style == "ukiyo-e"
     client.post("/api/styles/unpin")
-    assert ctx.config.style_mode == "rotate"
+    assert ctx.config.style_mode == "responsive"
 
 
 def test_preview_requires_key(tmp_path):
@@ -393,6 +413,44 @@ def test_generate_creates_gallery_image_without_posting(tmp_path):
     assert ctx.artist.style_name_arg == "linocut"   # style threaded through
     assert ctx.artist.force_new_arg is True          # fresh entry for the studio
     assert ctx.publisher.published == []             # NOT posted to the frame
+
+
+def test_art_direction_and_historical_generation_are_day_addressable(tmp_path):
+    _, ctx, client = _client(tmp_path)
+    direction = client.get("/api/art-direction/2026-07-05")
+    assert direction.status_code == 200
+    assert direction.json()["profile"]["archetype"] == "Singular voice"
+    assert direction.json()["recommendations"][0]["name"] == "ukiyo-e"
+    assert direction.json()["editions"] == []
+
+    response = client.post(
+        "/api/generate", json={"style": "linocut", "day": "2026-07-05"})
+    assert response.status_code == 200
+    for _ in range(50):
+        status = client.get("/api/generate/status").json()
+        if status["state"] == "done":
+            break
+        time.sleep(.02)
+    assert ctx.artist.when_arg.date().isoformat() == "2026-07-05"
+    assert ctx.artist.created_at_arg == datetime(2026, 7, 5, 12)
+    assert client.post("/api/generate", json={"day": "2026-07-06"}).status_code == 400
+
+
+def test_style_metadata_and_mode_api(tmp_path):
+    _, ctx, client = _client(tmp_path)
+    response = client.put("/api/styles/new", json={
+        "name": "Garden Clock", "prompt": "A clock of {scene}.", "avoid": "labels",
+        "collection": "Data Portraits", "description": "Time becomes form.",
+        "lineage": "phenology", "medium": "screenprint", "palette": "indigo",
+        "affinities": ["dawn-heavy"], "source": "https://example.com",
+    })
+    assert response.status_code == 200
+    style = next(s for s in client.get("/api/styles").json()["styles"]
+                 if s["name"] == "garden-clock")
+    assert style["collection"] == "Data Portraits"
+    assert style["affinities"] == ["dawn-heavy"]
+    assert client.post("/api/styles/mode/rotate").json()["mode"] == "rotate"
+    assert ctx.config.style_mode == "rotate"
 
 
 def test_post_image_async_publishes_and_marks(tmp_path):

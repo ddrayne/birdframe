@@ -2,7 +2,7 @@ import {api, app, esc, attr, ago, formBody, pageHeader, routeIsCurrent, toast, s
 
 const ENUMS = {
   post_mode: ['daily', 'live', 'manual'],
-  style_mode: ['rotate', 'pinned'],
+  style_mode: ['responsive', 'rotate', 'pinned'],
   image_quality: ['low', 'medium', 'high'],
 };
 
@@ -55,7 +55,7 @@ export async function renderSettings(token) {
       </section>
       <section class="card card-pad"><div class="eyebrow">Artwork</div><h2 style="font:500 24px var(--serif)">Picture tools have their own room</h2>
         <p class="muted">Generate editions, manage visual styles, review the archive, and send a chosen picture to the shared frame.</p>
-        <div class="button-row"><a class="btn secondary" href="#pictures/make">Make a picture</a><a class="btn secondary" href="#pictures/styles">Manage styles</a></div>
+        <div class="button-row"><a class="btn secondary" href="#pictures/reimagine">Reimagine a day</a><a class="btn secondary" href="#pictures/library">Style library</a></div>
       </section>
     </div>
   </article>`;

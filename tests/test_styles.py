@@ -1,4 +1,6 @@
-from birdframe.styles import load_styles, choose_style, DEFAULT_STYLES_DIR
+from birdframe.styles import (
+    load_styles, choose_style, recommend_styles, DEFAULT_STYLES_DIR, Style,
+)
 
 
 def _write(dir, name, prompt, avoid=""):
@@ -34,7 +36,27 @@ def test_choose_style_pinned(tmp_path):
 
 def test_shipped_styles_are_valid():
     styles = load_styles(DEFAULT_STYLES_DIR)
-    assert len(styles) == 6
+    assert len(styles) == 21
+    assert {s.collection for s in styles} >= {
+        "British Naturalists", "Print Traditions", "Decorative Histories",
+        "Data Portraits", "Material Experiments",
+    }
     for s in styles:
         assert "{scene}" in s.prompt
         assert s.avoid  # every shipped style lists things to avoid
+        assert s.description and s.lineage and s.medium and s.palette
+        assert s.affinities
+
+
+def test_responsive_choice_is_explainable_and_deterministic():
+    styles = [
+        Style("dawn", "x {scene}", affinities=("dawn-heavy", "spring")),
+        Style("night", "x {scene}", affinities=("night-active",)),
+        Style("contrast", "x {scene}"),
+    ]
+    profile = {"tags": ["spring", "dawn-heavy"]}
+    ranked = recommend_styles(styles, profile, day_index=42)
+    assert ranked[0].style.name == "dawn"
+    assert ranked[0].matched == ("dawn-heavy", "spring")
+    assert "dawn" in ranked[0].reason
+    assert choose_style(styles, "responsive", 42, profile=profile).name == "dawn"

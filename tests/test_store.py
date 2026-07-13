@@ -93,6 +93,33 @@ def test_image_record_roundtrip(tmp_path):
     assert s.get_image(img_id).posted_at == datetime(2026, 7, 5, 21, 1)
 
 
+def test_image_art_provenance_and_source_day_roundtrip(tmp_path):
+    s = Store(tmp_path / "db.sqlite")
+    img_id = s.add_image(
+        datetime(2026, 7, 13, 14), "/tmp/x.png", "dawn-chorus-clock", "prompt",
+        ["European Robin"], source_day="2026-07-05",
+        style_reason="The dawn rhythm suits a clock.",
+        art_profile={"archetype": "Dawn chorus", "hours": [0] * 24},
+    )
+    image = s.get_image(img_id)
+    assert image.generated_at.date().isoformat() == "2026-07-13"
+    assert image.source_day == "2026-07-05"
+    assert image.style_reason.startswith("The dawn")
+    assert image.art_profile["archetype"] == "Dawn chorus"
+    assert s.images_for_day("2026-07-05")[0]["id"] == img_id
+
+
+def test_hours_for_day_can_be_limited_without_altering_rows(tmp_path):
+    s = Store(tmp_path / "db.sqlite")
+    s.add_detection(Detection(_dt(5), "A a", "Alpha", .9))
+    s.add_detection(Detection(_dt(5, 20), "B b", "Beta", .9))
+    s.add_detection(Detection(_dt(8), "A a", "Alpha", .9))
+    assert s.hours_for_day(_dt(12), {"Alpha"})[5] == 1
+    assert s.hours_for_day(_dt(12), {"Alpha"})[8] == 1
+    assert sum(s.hours_for_day(_dt(12), set())) == 0
+    assert s.totals()["detections"] == 3
+
+
 def test_life_list_has_time_of_day_and_peak(tmp_path):
     s = Store(tmp_path / "db.sqlite")
     s.add_detection(Detection(datetime(2026, 7, 5, 5, 2), "Erithacus rubecula", "European Robin", 0.9))

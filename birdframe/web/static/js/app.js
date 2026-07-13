@@ -39,7 +39,7 @@ async function renderRoute() {
     else if (route.top === 'journal') await renderJournal(token, route.detail);
     else if (route.top === 'species') await renderSpecies(token, route.detail, route.params);
     else if (route.top === 'patterns') await renderPatterns(token, route.params);
-    else if (route.top === 'pictures') await renderPictures(token, route.detail || 'gallery');
+    else if (route.top === 'pictures') await renderPictures(token, route.detail || 'editions', route.params);
     else if (route.top === 'settings') await renderSettings(token);
     if (token === state.routeToken) {
       initChartTooltips(document);

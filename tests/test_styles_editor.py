@@ -48,3 +48,18 @@ def test_markdown_omits_empty_avoid():
     md = style_to_markdown(Style("x", "of {scene}", ""))
     assert "## Avoid" not in md
     assert "## Prompt" in md
+
+
+def test_style_metadata_roundtrip(tmp_path):
+    save_style(
+        tmp_path, "Garden Clock", "A clock of {scene}.", "labels",
+        collection="Data Portraits", description="Time becomes composition.",
+        lineage="phenology wheels", medium="screenprint", palette="indigo",
+        affinities=["dawn heavy", "spring"],
+        source="https://example.com/collection",
+    )
+    style = get_style(tmp_path, "garden-clock")
+    assert style.collection == "Data Portraits"
+    assert style.description == "Time becomes composition."
+    assert style.affinities == ("dawn-heavy", "spring")
+    assert style.source == "https://example.com/collection"

@@ -1,7 +1,9 @@
 from datetime import datetime
 
 from birdframe.store import SpeciesDay
-from birdframe.rollup import build_scene, season_for, build_prompt
+from birdframe.rollup import (
+    build_art_profile, build_scene, season_for, build_prompt, profile_to_dict,
+)
 from birdframe.styles import Style
 
 
@@ -45,3 +47,21 @@ def test_build_prompt_without_avoid():
     assert prompt.startswith("Paint a wren.")
     assert "accurately" in prompt          # plumage-accuracy guidance always appended
     assert "Avoid:" not in prompt
+
+
+def test_art_profile_turns_rhythm_into_an_explainable_fingerprint():
+    species = [_sd("Robin", 12, 5, 8), _sd("Blackbird", 10, 5, 9),
+               _sd("Wren", 9, 6, 10), _sd("Blue Tit", 8, 7, 11)]
+    hours = [0] * 24
+    hours[5:9] = [8, 11, 10, 6]
+    profile = build_art_profile(
+        species, hours, {"Wren"}, "light rain", datetime(2026, 4, 12, 21))
+    assert profile.archetype == "Dawn chorus"
+    assert {"spring", "rain", "dawn-heavy", "first-arrival", "even-chorus"} <= set(profile.tags)
+    assert profile.detection_count == 39
+    assert profile.active_span_hours == 4
+    assert profile_to_dict(profile)["hours"][5] == 8
+    scene = build_scene(species, {"Wren"}, "light rain",
+                        datetime(2026, 4, 12, 21), profile)
+    assert "visual rhythm" in scene
+    assert "never into a literal number" in scene

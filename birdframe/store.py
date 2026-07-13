@@ -37,6 +37,9 @@ class ImageRecord:
     prompt: str
     species: list[str]
     posted_at: datetime | None
+    source_day: str | None = None
+    style_reason: str = ""
+    art_profile: dict | None = None
 
 
 _ISO = "%Y-%m-%dT%H:%M:%S"
@@ -107,6 +110,18 @@ class Store:
                     species TEXT NOT NULL,
                     posted_at TEXT)"""
             )
+            # Art-direction provenance is additive: old archives remain valid,
+            # while new editions can explain the day they portray and why their
+            # visual language was chosen.
+            image_columns = {r["name"] for r in self._conn.execute(
+                "PRAGMA table_info(images)").fetchall()}
+            for name, definition in (
+                ("source_day", "TEXT"),
+                ("style_reason", "TEXT NOT NULL DEFAULT ''"),
+                ("art_profile", "TEXT"),
+            ):
+                if name not in image_columns:
+                    self._conn.execute(f"ALTER TABLE images ADD COLUMN {name} {definition}")
 
     def add_detection(self, det: Detection) -> None:
         with self._lock, self._conn:
@@ -154,6 +169,23 @@ class Store:
             (when.strftime("%Y-%m-%d"),),
         ).fetchall()
         return self._aggregate(rows, min_confidence)
+
+    def hours_for_day(self, when: datetime, species_names=None) -> list[int]:
+        """24-hour activity for a day, optionally limited to an assessed set.
+
+        This is a read-only lens over existing detections. Passing an empty set
+        intentionally produces an empty clock rather than falling back to all.
+        """
+        rows = self._conn.execute(
+            "SELECT ts, common_name FROM detections WHERE day = ?",
+            (when.strftime("%Y-%m-%d"),),
+        ).fetchall()
+        allowed = None if species_names is None else set(species_names)
+        hours = [0] * 24
+        for row in rows:
+            if allowed is None or row["common_name"] in allowed:
+                hours[int(row["ts"][11:13])] += 1
+        return hours
 
     def species_in_window(self, start: datetime, end: datetime,
                           min_confidence: float = 0.0) -> list[SpeciesDay]:
@@ -426,7 +458,7 @@ class Store:
     def species_image_appearances(self, common_name: str, limit: int = 24) -> list[dict]:
         """Generated artworks whose stored species list contains this species."""
         rows = self._conn.execute(
-            "SELECT id, generated_at, style, species, posted_at FROM images"
+            "SELECT id, generated_at, source_day, style, species, posted_at FROM images"
             " ORDER BY generated_at DESC"
         ).fetchall()
         out = []
@@ -446,8 +478,9 @@ class Store:
     def images_for_day(self, day: str) -> list[dict]:
         """Generated artworks for a journal day, newest first."""
         rows = self._conn.execute(
-            "SELECT id, generated_at, style, species, posted_at FROM images"
-            " WHERE substr(generated_at,1,10) = ? ORDER BY generated_at DESC",
+            "SELECT id, generated_at, source_day, style, species, posted_at FROM images"
+            " WHERE COALESCE(source_day, substr(generated_at,1,10)) = ?"
+            " ORDER BY generated_at DESC",
             (day,),
         ).fetchall()
         out = []
@@ -492,8 +525,10 @@ class Store:
                 debuts[r["first_day"]].append(r["common_name"])
 
         image_rows = self._conn.execute(
-            "SELECT id, substr(generated_at,1,10) AS day, generated_at, style, posted_at"
-            f" FROM images WHERE substr(generated_at,1,10) IN ({placeholders})"
+            "SELECT id, COALESCE(source_day, substr(generated_at,1,10)) AS day,"
+            " generated_at, style, posted_at"
+            f" FROM images WHERE COALESCE(source_day, substr(generated_at,1,10))"
+            f" IN ({placeholders})"
             " ORDER BY generated_at DESC", days,
         ).fetchall()
         images: dict[str, list[dict]] = {d: [] for d in days}
@@ -679,12 +714,16 @@ class Store:
         ).fetchall()
         return {r["common_name"] for r in rows if r["first_day"] == day}
 
-    def add_image(self, generated_at, path, style, prompt, species) -> int:
+    def add_image(self, generated_at, path, style, prompt, species,
+                  source_day: str | None = None, style_reason: str = "",
+                  art_profile: dict | None = None) -> int:
         with self._lock, self._conn:
             cur = self._conn.execute(
-                "INSERT INTO images (generated_at, path, style, prompt, species)"
-                " VALUES (?, ?, ?, ?, ?)",
-                (generated_at.strftime(_ISO), path, style, prompt, json.dumps(species)),
+                "INSERT INTO images (generated_at, path, style, prompt, species,"
+                " source_day, style_reason, art_profile) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (generated_at.strftime(_ISO), path, style, prompt, json.dumps(species),
+                 source_day or generated_at.strftime("%Y-%m-%d"), style_reason,
+                 json.dumps(art_profile) if art_profile is not None else None),
             )
             return cur.lastrowid
 
@@ -697,6 +736,9 @@ class Store:
             path=r["path"], style=r["style"], prompt=r["prompt"],
             species=json.loads(r["species"]),
             posted_at=datetime.strptime(r["posted_at"], _ISO) if r["posted_at"] else None,
+            source_day=r["source_day"] or r["generated_at"][:10],
+            style_reason=r["style_reason"] or "",
+            art_profile=json.loads(r["art_profile"]) if r["art_profile"] else None,
         )
 
     def count_paid_images_for_day(self, when: datetime) -> int:

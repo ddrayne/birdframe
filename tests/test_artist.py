@@ -63,6 +63,9 @@ def test_generate_creates_image_record_and_file(tmp_path, mocker):
     assert img.size == (1200, 1600)
     client.generate.assert_called_once()
     assert "European Robin" in client.generate.call_args.args[0]
+    assert rec.source_day == "2026-07-05"
+    assert rec.art_profile["archetype"] == "Singular voice"
+    assert rec.style_reason
 
 
 def test_generate_falls_back_to_poster_on_openai_error(tmp_path, mocker):
@@ -151,3 +154,33 @@ def test_min_species_threshold(tmp_path, mocker):
         store.add_detection(Detection(datetime(2026, 7, 5, 6 + i), sci, com, 0.9))
     artist.generate(when=datetime(2026, 7, 5, 21))   # only 2 species < 3
     client.generate.assert_not_called()
+
+
+def test_responsive_artist_chooses_for_the_day_and_explains_it(tmp_path, mocker):
+    client = mocker.Mock()
+    client.generate.return_value = _png()
+    styles = [
+        Style("night", "night {scene}", affinities=("night-active",)),
+        Style("dawn", "dawn {scene}", medium="woodcut",
+              affinities=("dawn-heavy", "summer")),
+    ]
+    store, artist = _artist(tmp_path, client, styles=styles, style_mode="responsive")
+    for hour in (5, 5, 6, 7):
+        store.add_detection(Detection(datetime(2026, 7, 5, hour), "A a", "Alpha", .9))
+    rec = artist.generate(datetime(2026, 7, 5, 21), force_paid=True)
+    assert rec.style == "dawn"
+    assert "dawn-led" in rec.style_reason
+    direction = artist.art_direction(datetime(2026, 7, 5, 21))
+    assert direction["recommendations"][0]["name"] == "dawn"
+
+
+def test_reimagined_day_keeps_source_date_but_records_creation_time(tmp_path, mocker):
+    client = mocker.Mock()
+    client.generate.return_value = _png()
+    store, artist = _artist(tmp_path, client)
+    store.add_detection(Detection(datetime(2026, 7, 5, 6), "A a", "Alpha", .9))
+    rec = artist.generate(
+        datetime(2026, 7, 5, 21), force_paid=True,
+        created_at=datetime(2026, 7, 13, 14), force_new=True)
+    assert rec.source_day == "2026-07-05"
+    assert rec.generated_at == datetime(2026, 7, 13, 14)
