@@ -7,8 +7,9 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import quote
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 STATIC = Path(__file__).resolve().parent / "static"
 
@@ -74,6 +75,7 @@ def _assess_species(ctx, s, day=None):
 def create_app(ctx: AppContext) -> FastAPI:
     import threading as _threading
     app = FastAPI(title="birdframe")
+    app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
     _capture = {"state": "idle", "cancel": False, "result": None,
                 "species": [], "lock": _threading.Lock()}
@@ -92,9 +94,9 @@ def create_app(ctx: AppContext) -> FastAPI:
     def manifest():
         return JSONResponse({
             "name": "birdframe", "short_name": "birdframe",
-            "description": "Birds heard at the window in Edinburgh",
+            "description": "A living field journal of the birds heard at an Edinburgh window",
             "start_url": "/", "display": "standalone",
-            "background_color": "#14170F", "theme_color": "#2E6A4F",
+            "background_color": "#10150F", "theme_color": "#173C31",
             "icons": [
                 {"src": "/icon-192.png", "sizes": "192x192", "type": "image/png"},
                 {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png",
@@ -510,8 +512,8 @@ def create_app(ctx: AppContext) -> FastAPI:
         return ("very unusual here" if geo < 0.06 else "unusual here" if geo < 0.12
                 else "uncommon here" if geo < 0.30 else "common here")
 
-    @app.get("/api/census")
-    def census():
+    def _life_entries() -> list[dict]:
+        """The shared, reliability-aware species directory payload."""
         from birdframe.reliability import GEO_DEFAULT, assess
         with_clips = ctx.store.species_with_any_clip()
         entries = []
@@ -524,31 +526,176 @@ def create_app(ctx: AppContext) -> FastAPI:
                 "first_day": r["first_day"], "last_day": r["last_day"],
                 "total": r["total"], "days": r["days"], "best_confidence": round(r["best"], 2),
                 "earliest": r["earliest"], "latest": r["latest"], "peak_hour": r["peak_hour"],
-                "tier": a.tier, "reasons": a.reasons,
+                "tier": a.tier, "reliability": a.score, "reasons": a.reasons,
                 "geo": round(geo, 3), "rarity": _rarity_label(geo),
                 "has_clip": has_clip,
                 "clip_url": f"/api/species-clip/{quote(r['common_name'])}" if has_clip else None,
             })
+        return entries
+
+    def _start_day(days: int | None) -> str | None:
+        if days is None:
+            return None
+        days = max(1, min(int(days), 3660))
+        return (ctx.now().date() - timedelta(days=days - 1)).isoformat()
+
+    def _assess_rollup(r: dict) -> dict:
+        from birdframe.reliability import GEO_DEFAULT, assess
+        geo = (ctx.geo_lookup or {}).get(r["scientific_name"], GEO_DEFAULT)
+        a = assess(r["best_confidence"], geo, r["count"])
+        return {
+            "common_name": r["common_name"], "scientific_name": r["scientific_name"],
+            "count": r["count"], "best_confidence": round(r["best_confidence"], 2),
+            "tier": a.tier, "reliability": a.score, "reasons": a.reasons,
+            "geo": round(geo, 3), "rarity": _rarity_label(geo),
+        }
+
+    @app.get("/api/census")
+    def census():
+        entries = _life_entries()
         return {"totals": ctx.store.totals(), "life_list": entries,
                 "hours": ctx.store.hour_histogram(), "daily": ctx.store.daily_counts(),
                 "heatmap": ctx.store.activity_matrix(days=14)}
 
+    @app.get("/api/journal")
+    def journal(limit: int = Query(90, ge=1, le=366)):
+        """Newest-first index of historical listening days."""
+        days = []
+        for row in ctx.store.journal_days(limit=limit):
+            item = dict(row)
+            item["top_species"] = [_assess_rollup(s) for s in row["top_species"]]
+            item["reliable_species"] = sum(
+                1 for s in item["top_species"] if s["tier"] != "tentative")
+            days.append(item)
+        return {"days": days, "totals": ctx.store.totals()}
+
+    @app.get("/api/day/{day}")
+    def day_detail(day: str):
+        """A date-addressable field-journal entry built only from stored data."""
+        try:
+            parsed = datetime.strptime(day, "%Y-%m-%d")
+        except ValueError:
+            return JSONResponse({"error": "date must be YYYY-MM-DD"}, status_code=400)
+        raw = ctx.store.day_detail(day)
+        if raw is None:
+            return JSONResponse({"error": "no detections on this day"}, status_code=404)
+        species = [_assess_species(ctx, s, day) for s in raw.pop("species")]
+        species.sort(key=lambda x: (_TIER_ORDER[x["tier"]], -x["count"]))
+        clips = []
+        for c in ctx.store.clips_for_day(day):
+            if not Path(c["path"]).exists():
+                continue
+            clips.append({
+                "common_name": c["common_name"], "scientific_name": c["scientific_name"],
+                "confidence": round(c["confidence"], 2), "at": c["ts"][11:19],
+                "url": f"/api/clip/{day}/{quote(c['common_name'])}",
+            })
+        return {
+            **raw,
+            "date": parsed.strftime("%Y-%m-%d"),
+            "species": species,
+            "new_species": sorted(ctx.store.first_ever_on_day(parsed)),
+            "clips": clips,
+            "images": ctx.store.images_for_day(day),
+        }
+
+    @app.get("/api/patterns")
+    def patterns(days: int | None = Query(None, ge=1, le=3660),
+                 tiers: str = "confirmed,probable,tentative"):
+        """Range- and reliability-filterable aggregate views of the same rows."""
+        entries = _life_entries()
+        wanted = {t.strip() for t in tiers.split(",") if t.strip()}
+        valid = set(_TIER_ORDER)
+        if not wanted or not wanted <= valid:
+            return JSONResponse({"error": "tiers must be confirmed, probable, or tentative"},
+                                status_code=400)
+        included = [e for e in entries if e["tier"] in wanted]
+        aggregate = ctx.store.pattern_summary(
+            start_day=_start_day(days),
+            species_names=[e["common_name"] for e in included],
+        )
+        meta = {e["common_name"]: e for e in entries}
+        for row in aggregate["by_species"]:
+            detail = meta.get(row["common_name"], {})
+            row.update({"tier": detail.get("tier"), "rarity": detail.get("rarity"),
+                        "geo": detail.get("geo"), "clip_url": detail.get("clip_url")})
+        tier_counts = {tier: sum(1 for e in entries if e["tier"] == tier)
+                       for tier in _TIER_ORDER}
+        return {
+            **aggregate,
+            "range_days": days,
+            "tiers": sorted(wanted, key=_TIER_ORDER.get),
+            "tier_counts": tier_counts,
+            "life_list": included,
+        }
+
     @app.get("/api/species/{common_name}")
-    def species_detail(common_name: str):
+    def species_detail(common_name: str,
+                       days: int | None = Query(None, ge=1, le=3660)):
+        """A full, linkable species dossier over all time or a recent range."""
         from birdframe.reliability import GEO_DEFAULT, assess
-        d = ctx.store.species_detail(common_name)
+        d = ctx.store.species_dossier(common_name, start_day=_start_day(days))
         if d is None:
             return JSONResponse({"error": "not heard here"}, status_code=404)
+
+        directory = sorted(_life_entries(), key=lambda x: (-x["total"], x["common_name"]))
+        lifetime = next((e for e in directory if e["common_name"] == common_name), None)
         geo = (ctx.geo_lookup or {}).get(d["scientific_name"], GEO_DEFAULT)
-        a = assess(d["best_confidence"], geo, d["total"])
+        # Reliability remains a lifetime judgement so selecting a short range
+        # never makes the same species appear to change identity.
+        reliability_total = lifetime["total"] if lifetime else d["total"]
+        reliability_best = lifetime["best_confidence"] if lifetime else d["best_confidence"]
+        a = assess(reliability_best, geo, reliability_total)
+        range_total = ctx.store.detection_count(start_day=_start_day(days))
         d["best_confidence"] = round(d["best_confidence"], 2)
+        d["avg_confidence"] = round(d["avg_confidence"], 3)
         d["geo"] = round(geo, 3)
         d["rarity"] = _rarity_label(geo)
         d["tier"] = a.tier
+        d["reliability"] = a.score
         d["reasons"] = a.reasons
-        clip = ctx.store.best_clip_for_species(common_name)
-        d["clip_url"] = f"/api/species-clip/{quote(common_name)}" if clip else None
+        d["range_days"] = days
+        d["share"] = round(d["total"] / range_total, 5) if range_total else 0
+        d["rank"] = (next((i for i, e in enumerate(directory, 1)
+                           if e["common_name"] == common_name), None))
+        d["lifetime"] = lifetime
+
+        clips = []
+        start = _start_day(days)
+        for c in ctx.store.clips_for_species(common_name):
+            if start and c["day"] < start:
+                continue
+            if not Path(c["path"]).exists():
+                continue
+            clips.append({"day": c["day"], "confidence": round(c["confidence"], 2),
+                          "at": c["ts"][11:19],
+                          "url": f"/api/clip/{c['day']}/{quote(common_name)}"})
+        d["clips"] = clips
+        best_clip = max(clips, key=lambda c: c["confidence"]) if clips else None
+        d["clip_url"] = best_clip["url"] if best_clip else None
+
+        by_name = {e["common_name"]: e for e in directory}
+        for companion in d["companions"]:
+            meta = by_name.get(companion["common_name"])
+            if meta:
+                companion.update({"tier": meta["tier"], "rarity": meta["rarity"],
+                                  "clip_url": meta["clip_url"]})
+        d["observations"] = ctx.store.species_observations(
+            common_name, limit=60, start_day=_start_day(days))
+        d["images"] = ctx.store.species_image_appearances(common_name)
         return d
+
+    @app.get("/api/species/{common_name}/detections")
+    def species_detections(common_name: str,
+                           limit: int = Query(100, ge=1, le=250),
+                           before: str | None = None,
+                           days: int | None = Query(None, ge=1, le=3660)):
+        if not ctx.store.species_detail(common_name):
+            return JSONResponse({"error": "not heard here"}, status_code=404)
+        rows = ctx.store.species_observations(
+            common_name, limit=limit, before=before, start_day=_start_day(days))
+        return {"detections": rows,
+                "next_before": rows[-1]["ts"] if len(rows) == limit else None}
 
     @app.get("/api/species-clip/{common_name}")
     def species_clip(common_name: str):

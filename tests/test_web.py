@@ -101,6 +101,8 @@ def test_post_now_generates_and_publishes(tmp_path):
 def test_index_served(tmp_path):
     _, _, client = _client(tmp_path)
     assert client.get("/").status_code == 200
+    assert client.get("/static/app.css").status_code == 200
+    assert client.get("/static/js/app.js").status_code == 200
 
 
 def test_now_endpoint_reports_latest_and_feed(tmp_path):
@@ -316,6 +318,56 @@ def test_census_and_export(tmp_path):
     csv = client.get("/api/export.csv")
     assert csv.status_code == 200 and "text/csv" in csv.headers["content-type"]
     assert "Eurasian Blackbird" in csv.text
+
+
+def test_journal_index_and_historical_day_are_addressable(tmp_path):
+    from datetime import datetime as _dt
+    store, ctx, client = _client(tmp_path)
+    store.add_detection(Detection(_dt(2026, 7, 5, 7), "Turdus merula", "Eurasian Blackbird", 0.92))
+    journal = client.get("/api/journal").json()
+    assert journal["days"][0]["day"] == "2026-07-05"
+    assert journal["days"][0]["detections"] == 2
+    day = client.get("/api/day/2026-07-05").json()
+    assert day["species_count"] == 2
+    assert len(day["quarters"]) == 96 and len(day["hours"]) == 24
+    assert len(day["quarter_species"]) == 96 and len(day["hour_species"]) == 24
+    assert {s["common_name"] for s in day["species"]} == {"European Robin", "Eurasian Blackbird"}
+    assert client.get("/api/day/not-a-date").status_code == 400
+
+
+def test_species_dossier_exposes_detail_without_changing_rows(tmp_path):
+    from datetime import datetime as _dt
+    store, ctx, client = _client(tmp_path)
+    store.add_detection(Detection(_dt(2026, 7, 5, 6, 5), "Erithacus rubecula", "European Robin", 0.8))
+    before = store.totals()["detections"]
+    dossier = client.get("/api/species/European Robin").json()
+    assert dossier["total"] == 2
+    assert dossier["daily"][0]["detections"] == 2
+    assert len(dossier["confidence_histogram"]) == 10
+    assert "observations" in dossier and "images" in dossier and "companions" in dossier
+    assert dossier["rank"] == 1 and dossier["share"] == 1.0
+    rows = client.get("/api/species/European Robin/detections?limit=1").json()
+    assert len(rows["detections"]) == 1
+    assert store.totals()["detections"] == before       # every view is read-only
+
+
+def test_patterns_filters_reliability_layers_without_deleting_data(tmp_path):
+    from datetime import datetime as _dt
+    store = Store(tmp_path / "db.sqlite")
+    for minute in range(3):
+        store.add_detection(Detection(_dt(2026, 7, 5, 6, minute), "Turdus merula", "Eurasian Blackbird", 0.95))
+    store.add_detection(Detection(_dt(2026, 7, 5, 7), "Podiceps cristatus", "Great Crested Grebe", 0.86))
+    ctx = AppContext(store=store, artist=FakeArtist(tmp_path / "i.png"),
+                     publisher=FakePublisher(), now=lambda: _dt(2026, 7, 5, 12),
+                     config=Config.load(tmp_path / "c.toml"),
+                     geo_lookup={"Turdus merula": 0.97, "Podiceps cristatus": 0.048})
+    client = TestClient(create_app(ctx))
+    all_rows = client.get("/api/patterns").json()
+    solid = client.get("/api/patterns?tiers=confirmed").json()
+    assert all_rows["totals"]["detections"] == 4
+    assert solid["totals"]["detections"] == 3
+    assert solid["by_species"][0]["common_name"] == "Eurasian Blackbird"
+    assert store.totals()["detections"] == 4
 
 
 def test_health_endpoint(tmp_path):
