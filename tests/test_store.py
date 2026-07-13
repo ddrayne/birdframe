@@ -118,3 +118,13 @@ def test_species_detail_and_activity_matrix(tmp_path):
     assert {x["day"] for x in m} == {"2026-07-05", "2026-07-06"}
     assert m[0]["hours"][5] == 2      # day 5 had two 05:00 detections
     assert m[1]["hours"][5] == 1      # day 6 had one
+
+
+def test_best_clip_for_species(tmp_path):
+    s = Store(tmp_path / "db.sqlite")
+    assert s.best_clip_for_species("European Robin") is None
+    s.upsert_clip("2026-07-05", "European Robin", "Erithacus rubecula", 0.7, "/d5.ogg", _dt(6))
+    s.upsert_clip("2026-07-06", "European Robin", "Erithacus rubecula", 0.95, "/d6.ogg", _dt(6))
+    best = s.best_clip_for_species("European Robin")
+    assert best["path"] == "/d6.ogg" and best["confidence"] == 0.95   # clearest across days
+    assert s.species_with_any_clip() == {"European Robin"}

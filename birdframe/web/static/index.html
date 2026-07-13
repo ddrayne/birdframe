@@ -878,7 +878,7 @@ async function loadCensus() {
   $('#rarityBoard').innerHTML = rare.map(s=>`
     <div class="rboard-row" onclick="openSpecies('${esc(s.common_name).replace(/'/g,"\\'")}')">
       <span class="rarity-dot" style="background:${rarityColor(s.geo)}"></span>
-      <span class="rr-name">${esc(s.common_name)} <span class="tier tier-${s.tier}">${s.tier}</span></span>
+      <span class="rr-name">${esc(s.common_name)} ${clipBtn(s.clip_url)} <span class="tier tier-${s.tier}">${s.tier}</span></span>
       <span class="rr-geo" title="range-model plausibility here">${s.rarity}</span>
     </div>`).join('');
   // heatmap day × hour
@@ -903,7 +903,7 @@ function renderSpeciesGrid(sort) {
   $('#speciesGrid').innerHTML = list.map(s=>{
     // tiny activity clock: reconstruct from peak only isn't enough — use a chip instead
     return `<div class="sp-card" onclick="openSpecies('${esc(s.common_name).replace(/'/g,"\\'")}')">
-      <div class="sp-name">${esc(s.common_name)}</div>
+      <div class="sp-name">${esc(s.common_name)} ${clipBtn(s.clip_url)}</div>
       <div class="sp-sci">${esc(s.scientific_name)}</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         <span class="rchip" style="background:${rarityColor(s.geo)}22;color:${rarityColor(s.geo)}">${s.rarity}</span>
@@ -934,7 +934,7 @@ async function openSpecies(name) {
     <div class="modal-hero">
       ${wiki.thumbnail?`<img src="${wiki.thumbnail}" alt="">`:''}
       <div>
-        <h2>${esc(d.common_name)}</h2>
+        <h2>${esc(d.common_name)} ${clipBtn(d.clip_url)}</h2>
         <div class="sci">${esc(d.scientific_name)}
           <span class="tier tier-${d.tier}">${d.tier}</span></div>
         <div class="modal-extract">${esc((wiki.extract||'').slice(0,220))}${wiki.extract&&wiki.extract.length>220?'…':''}

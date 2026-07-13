@@ -458,10 +458,12 @@ def create_app(ctx: AppContext) -> FastAPI:
     @app.get("/api/census")
     def census():
         from birdframe.reliability import GEO_DEFAULT, assess
+        with_clips = ctx.store.species_with_any_clip()
         entries = []
         for r in ctx.store.life_list():
             geo = (ctx.geo_lookup or {}).get(r["scientific_name"], GEO_DEFAULT)
             a = assess(r["best"], geo, r["total"])
+            has_clip = r["common_name"] in with_clips
             entries.append({
                 "common_name": r["common_name"], "scientific_name": r["scientific_name"],
                 "first_day": r["first_day"], "last_day": r["last_day"],
@@ -469,6 +471,8 @@ def create_app(ctx: AppContext) -> FastAPI:
                 "earliest": r["earliest"], "latest": r["latest"], "peak_hour": r["peak_hour"],
                 "tier": a.tier, "reasons": a.reasons,
                 "geo": round(geo, 3), "rarity": _rarity_label(geo),
+                "has_clip": has_clip,
+                "clip_url": f"/api/species-clip/{quote(r['common_name'])}" if has_clip else None,
             })
         return {"totals": ctx.store.totals(), "life_list": entries,
                 "hours": ctx.store.hour_histogram(), "daily": ctx.store.daily_counts(),
@@ -487,7 +491,16 @@ def create_app(ctx: AppContext) -> FastAPI:
         d["rarity"] = _rarity_label(geo)
         d["tier"] = a.tier
         d["reasons"] = a.reasons
+        clip = ctx.store.best_clip_for_species(common_name)
+        d["clip_url"] = f"/api/species-clip/{quote(common_name)}" if clip else None
         return d
+
+    @app.get("/api/species-clip/{common_name}")
+    def species_clip(common_name: str):
+        clip = ctx.store.best_clip_for_species(common_name)
+        if not clip or not Path(clip["path"]).exists():
+            return JSONResponse({"error": "no recording"}, status_code=404)
+        return FileResponse(clip["path"], media_type="audio/ogg")
 
     @app.get("/api/export.csv")
     def export_csv():

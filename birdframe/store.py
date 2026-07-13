@@ -237,6 +237,17 @@ class Store:
             out.append(d)
         return out
 
+    def species_with_any_clip(self) -> set[str]:
+        rows = self._conn.execute("SELECT DISTINCT common_name FROM clips").fetchall()
+        return {r["common_name"] for r in rows}
+
+    def best_clip_for_species(self, common_name: str) -> dict | None:
+        """The clearest recording of a species across all days (highest confidence)."""
+        r = self._conn.execute(
+            "SELECT day, path, confidence FROM clips WHERE common_name = ?"
+            " ORDER BY confidence DESC LIMIT 1", (common_name,)).fetchone()
+        return dict(r) if r else None
+
     def activity_matrix(self, days: int = 14) -> list[dict]:
         """Recent day × hour detection counts — a heatmap of when the garden sings."""
         recent_days = [r["day"] for r in self._conn.execute(
