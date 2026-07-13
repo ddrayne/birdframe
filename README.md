@@ -20,18 +20,26 @@ gull, curlew, greenfinch and dunnock over the Edinburgh skyline.</em></p>
 
 ### The dashboard
 
-| Now — live listening | Census — your bird history |
-|---|---|
-| ![Now tab](docs/screenshots/now.png) | ![Census tab](docs/screenshots/census.png) |
+The dashboard is a personal field journal rather than a raw event monitor:
 
-The **Now** view shows the most-recent bird with its reliability tier, a live
-detection feed with playable clips, and an activity sparkline. **Census** is
-your growing life list, all-time daily rhythm, and CSV export. The editable
-**Styles** library controls how each day is painted.
+- **Today** is the living page: the latest voice, the day’s story and pulse,
+  first-ever visitors, saved recordings, and every detection in clear
+  confirmed / probable / tentative layers.
+- **Journal** reopens any listening day with its artwork, 15-minute
+  soundscape, species-aware hourly rhythm, recordings, discoveries, and full
+  roll call.
+- **Species** is the life list. Every species has a permanent dossier with
+  day-by-day history, time-of-day pattern, confidence profile, recordings,
+  co-occurring soundscapes, raw matches, and artwork appearances.
+- **Patterns** reveals the long view: volume, richness, unusual voices,
+  day-by-hour heatmaps, and a searchable “soundscape score” showing when each
+  species is active through the 24-hour day.
+- **Pictures** combines the artwork archive and editable style studio;
+  **Settings** keeps health and configuration out of the journal itself.
 
-<p align="center">
-  <img src="docs/screenshots/styles.png" alt="Styles editor" width="520">
-</p>
+Charts expose exact counts and species composition on hover or tap. The full
+archive remains visible throughout; filters derive views without changing or
+discarding stored detections.
 
 ## What it does
 

@@ -128,3 +128,51 @@ def test_best_clip_for_species(tmp_path):
     best = s.best_clip_for_species("European Robin")
     assert best["path"] == "/d6.ogg" and best["confidence"] == 0.95   # clearest across days
     assert s.species_with_any_clip() == {"European Robin"}
+
+
+def test_species_dossier_keeps_raw_rows_and_builds_longitudinal_views(tmp_path):
+    s = Store(tmp_path / "db.sqlite")
+    # Robin and blackbird share two 15-minute soundscape windows.
+    for when, confidence in [
+        (datetime(2026, 7, 5, 5, 2), 0.8),
+        (datetime(2026, 7, 5, 5, 8), 0.9),
+        (datetime(2026, 7, 6, 6, 1), 0.7),
+    ]:
+        s.add_detection(Detection(when, "Erithacus rubecula", "European Robin", confidence))
+    s.add_detection(Detection(datetime(2026, 7, 5, 5, 10), "Turdus merula", "Eurasian Blackbird", 0.95))
+    s.add_detection(Detection(datetime(2026, 7, 6, 6, 12), "Turdus merula", "Eurasian Blackbird", 0.92))
+
+    d = s.species_dossier("European Robin")
+    assert d["total"] == 3 and d["days"] == 2
+    assert d["daily"][0]["detections"] == 2
+    assert d["hours"][5] == 2 and sum(d["confidence_histogram"]) == 3
+    assert d["companions"][0]["common_name"] == "Eurasian Blackbird"
+    assert d["companions"][0]["shared_windows"] == 2
+    assert len(s.species_observations("European Robin", limit=2)) == 2
+
+    recent = s.species_dossier("European Robin", start_day="2026-07-06")
+    assert recent["total"] == 1 and recent["first_day"] == "2026-07-06"
+
+
+def test_journal_day_and_pattern_aggregates(tmp_path):
+    s = Store(tmp_path / "db.sqlite")
+    s.add_detection(Detection(datetime(2026, 7, 5, 5, 2), "Erithacus rubecula", "European Robin", 0.9))
+    s.add_detection(Detection(datetime(2026, 7, 5, 5, 18), "Turdus merula", "Eurasian Blackbird", 0.8))
+    s.add_detection(Detection(datetime(2026, 7, 6, 8, 4), "Erithacus rubecula", "European Robin", 0.85))
+
+    journal = s.journal_days()
+    assert [d["day"] for d in journal] == ["2026-07-06", "2026-07-05"]
+    assert journal[1]["new_species"] == ["Eurasian Blackbird", "European Robin"]
+    detail = s.day_detail("2026-07-05")
+    assert detail["detections"] == 2 and detail["species_count"] == 2
+    assert detail["quarters"][5 * 4] == 1 and detail["quarters"][5 * 4 + 1] == 1
+    assert detail["hour_species"][5]["species_count"] == 2
+    assert detail["quarter_species"][5 * 4]["species"][0]["common_name"] == "European Robin"
+
+    robin_only = s.pattern_summary(species_names=["European Robin"])
+    assert robin_only["totals"]["detections"] == 2
+    assert robin_only["by_species"][0]["common_name"] == "European Robin"
+    assert robin_only["by_species"][0]["hours"][5] == 1
+    assert robin_only["hour_species"][5]["species"][0]["common_name"] == "European Robin"
+    assert len(robin_only["heatmap"]) == 2
+    assert robin_only["heatmap"][0]["species"][5]["species_count"] == 1
