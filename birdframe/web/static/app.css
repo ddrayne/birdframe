@@ -498,8 +498,11 @@ select { cursor: pointer; }
 .audio-progress i { display: block; height: 100%; width: 0; background: var(--gold); }
 .lightbox { position: fixed; inset: 0; z-index: 100; background: rgb(5 8 6 / 92%); backdrop-filter: blur(8px); display: grid; place-items: center; padding: 38px; }
 .lightbox img { max-height: 82vh; max-width: min(720px,86vw); border-radius: 12px; box-shadow: 0 24px 80px rgb(0 0 0 / 60%); }
-.lightbox > div { position: fixed; bottom: 18px; left: 20px; right: 20px; color: white; text-align: center; }
-.lightbox-close { position: fixed; top: 16px; right: 16px; width: 42px; height: 42px; border-radius: 50%; border: 1px solid rgb(255 255 255 / 24%); background: rgb(255 255 255 / 8%); color: white; font-size: 23px; cursor: pointer; }
+.lightbox > div { position: fixed; bottom: calc(18px + env(safe-area-inset-bottom)); left: 20px; right: 20px; color: white; text-align: center; }
+.lightbox-send { display: block; margin: 12px auto 0; padding: 8px 18px; border-radius: 999px; border: 1px solid rgb(255 255 255 / 30%); background: rgb(255 255 255 / 10%); color: white; cursor: pointer; }
+.lightbox-send:disabled { opacity: .6; cursor: default; }
+/* Clear the iOS status bar / home indicator in standalone mode. */
+.lightbox-close { position: fixed; top: calc(16px + env(safe-area-inset-top)); right: 16px; width: 42px; height: 42px; border-radius: 50%; border: 1px solid rgb(255 255 255 / 24%); background: rgb(255 255 255 / 8%); color: white; font-size: 23px; cursor: pointer; }
 .toast { position: fixed; z-index: 110; right: 20px; bottom: 24px; max-width: 360px; padding: 12px 16px; border-radius: 11px; background: var(--ink); color: var(--page); box-shadow: var(--shadow); }
 .mobile-nav { display: none; }
 

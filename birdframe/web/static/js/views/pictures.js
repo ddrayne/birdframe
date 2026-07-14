@@ -1,5 +1,6 @@
 import {
-  api, app, attr, esc, formBody, num, pageHeader, dateLabel, routeIsCurrent, toast,
+  api, app, attr, esc, formBody, num, pageHeader, dateLabel, routeIsCurrent,
+  sendImageToFrame, toast,
 } from '../core.js';
 import {hourBars, initChartTooltips} from '../charts.js';
 
@@ -52,26 +53,6 @@ function editionCard(image, styleMap) {
   </article>`;
 }
 
-async function sendImage(id, button) {
-  button.disabled = true;
-  const original = button.textContent;
-  button.textContent = 'Sending…';
-  try {
-    await api(`/api/post/${id}`, {method: 'POST'});
-    const poll = setInterval(async () => {
-      const status = await api('/api/post/status').catch(() => null);
-      if (!status || status.state === 'running') return;
-      clearInterval(poll);
-      button.disabled = false; button.textContent = original;
-      if (status.publish === 'posted') toast('Picture accepted by the frame. The e-ink refresh takes about 30 seconds.');
-      else if (status.publish === 'held') toast('The shared frame is currently held by someone else.');
-      else toast(`The frame could not be reached${status.detail ? `: ${status.detail}` : '.'}`);
-    }, 1500);
-  } catch (error) {
-    button.disabled = false; button.textContent = original; toast(error.message);
-  }
-}
-
 async function renderEditions(token) {
   const [history, library] = await Promise.all([api('/api/history'), api('/api/styles')]);
   if (!routeIsCurrent(token)) return;
@@ -109,7 +90,7 @@ async function renderEditions(token) {
   document.querySelectorAll('#editionCollection,#editionSeason,#editionPosted').forEach(control => control.addEventListener('change', draw));
   app.querySelector('.page').addEventListener('click', event => {
     const button = event.target.closest('[data-send-image]');
-    if (button) sendImage(button.dataset.sendImage, button);
+    if (button) sendImageToFrame(button.dataset.sendImage, button);
   });
 }
 

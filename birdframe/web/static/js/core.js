@@ -181,11 +181,36 @@ export function initAudio() {
   });
 }
 
+export async function sendImageToFrame(id, button) {
+  button.disabled = true;
+  const original = button.textContent;
+  button.textContent = 'Sending…';
+  try {
+    await api(`/api/post/${id}`, {method: 'POST'});
+    const poll = setInterval(async () => {
+      const status = await api('/api/post/status').catch(() => null);
+      if (!status || status.state === 'running') return;
+      clearInterval(poll);
+      button.disabled = false; button.textContent = original;
+      if (status.publish === 'posted') toast('Picture accepted by the frame. The e-ink refresh takes about 30 seconds.');
+      else if (status.publish === 'held') toast('The shared frame is currently held by someone else.');
+      else toast(`The frame could not be reached${status.detail ? `: ${status.detail}` : '.'}`);
+    }, 1500);
+  } catch (error) {
+    button.disabled = false; button.textContent = original; toast(error.message);
+  }
+}
+
 export function openLightbox(src, caption, imageAlt = '') {
   const box = document.querySelector('#lightbox');
   document.querySelector('#lightboxImage').src = src;
   document.querySelector('#lightboxImage').alt = imageAlt;
   document.querySelector('#lightboxCaption').innerHTML = caption;
+  // Any archived image can go to the frame straight from the viewer.
+  const send = document.querySelector('#lightboxSend');
+  const archived = /^\/api\/image\/(\d+)$/.exec(src);
+  send.hidden = !archived;
+  if (archived) send.dataset.sendImage = archived[1];
   box.hidden = false;
   document.body.style.overflow = 'hidden';
 }
@@ -202,6 +227,8 @@ export function initLightbox() {
       event.preventDefault();
       openLightbox(trigger.dataset.lightbox, trigger.dataset.caption || '', trigger.dataset.alt || '');
     }
+    const send = event.target.closest('#lightboxSend');
+    if (send) { sendImageToFrame(send.dataset.sendImage, send); return; }
     if (event.target.closest('[data-action="close-lightbox"]') || event.target.id === 'lightbox') closeLightbox();
   });
   document.addEventListener('keydown', event => { if (event.key === 'Escape') closeLightbox(); });
