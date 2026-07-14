@@ -10,6 +10,11 @@ import base64
 import time
 
 
+class NoImageError(RuntimeError):
+    """The API returned 200 but no usable image — a bug or blocked prompt, not
+    a transient failure; retrying would only burn paid generations."""
+
+
 class OpenAIImageClient:
     SIZE = "1024x1536"  # portrait; composed to 1200x1600 downstream
 
@@ -36,7 +41,7 @@ class OpenAIImageClient:
         if url:
             import httpx
             return httpx.get(url, timeout=60).content
-        raise RuntimeError("image response had neither b64_json nor url")
+        raise NoImageError("image response had neither b64_json nor url")
 
     def generate(self, prompt: str) -> bytes:
         last = None
@@ -49,6 +54,8 @@ class OpenAIImageClient:
                 # A 200 that we can't turn into bytes is a bug, not a transient
                 # error — don't burn another paid generation retrying it.
                 return self._image_bytes(resp.data[0])
+            except NoImageError:
+                raise
             except Exception as exc:
                 last = exc
                 if attempt < self.max_retries - 1:
@@ -86,7 +93,7 @@ class GeminiImageClient:
                 return data
         # A 200 with no image (e.g. a text-only safety refusal) is a bug or a
         # blocked prompt, not a transient error — don't burn paid retries on it.
-        raise RuntimeError("Gemini response contained no image part")
+        raise NoImageError("Gemini response contained no image part")
 
     def generate(self, prompt: str) -> bytes:
         last = None
@@ -103,10 +110,10 @@ class GeminiImageClient:
                     },
                 )
                 return self._image_bytes(resp)
+            except NoImageError:
+                raise
             except Exception as exc:
                 last = exc
-                if isinstance(exc, RuntimeError) and "no image part" in str(exc):
-                    raise
                 if attempt < self.max_retries - 1:
                     time.sleep(self.backoff * (attempt + 1))
         raise last

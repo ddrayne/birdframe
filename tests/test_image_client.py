@@ -2,7 +2,8 @@ import base64
 
 import pytest
 
-from birdframe.image_client import GeminiImageClient, OpenAIImageClient
+from birdframe.image_client import (GeminiImageClient, NoImageError,
+                                    OpenAIImageClient)
 
 
 def test_generate_returns_decoded_bytes(mocker):
@@ -28,6 +29,19 @@ def test_generate_retries_then_raises(mocker):
     with pytest.raises(RuntimeError):
         client.generate("x")
     assert fake.images.generate.call_count == 3
+
+
+def test_openai_no_image_raises_without_retry_burn(mocker):
+    """A 200 whose item has neither b64_json nor url is a hard error, and must
+    not burn paid retries."""
+    fake = mocker.Mock()
+    fake.images.generate.return_value = mocker.Mock(
+        data=[mocker.Mock(b64_json=None, url=None)])
+    client = OpenAIImageClient(api_key="sk-test", model="gpt-image-1",
+                               quality="high", sdk=fake, max_retries=3, backoff=0)
+    with pytest.raises(NoImageError):
+        client.generate("p")
+    assert fake.images.generate.call_count == 1
 
 
 def _gemini_resp(mocker, parts):
@@ -78,7 +92,7 @@ def test_gemini_no_image_part_raises_without_retry_burn(mocker):
     fake.models.generate_content.return_value = _gemini_resp(
         mocker, [_text_part(mocker)])
     client = GeminiImageClient(api_key="k", sdk=fake, max_retries=3, backoff=0)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(NoImageError):
         client.generate("p")
     assert fake.models.generate_content.call_count == 1
 

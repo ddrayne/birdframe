@@ -28,7 +28,9 @@ def test_missing_key_returns_none(tmp_path, mocker):
     assert _make_image_client(_config(tmp_path, "gemini")) is None
 
 
-def test_unknown_provider_returns_none_with_warning(tmp_path, mocker, caplog):
+def test_unknown_provider_returns_none_with_warning(tmp_path, caplog):
     """A typo'd image_provider must not crash startup — warn and fall back to
     the free poster path."""
-    assert _make_image_client(_config(tmp_path, "gemeni")) is None
+    with caplog.at_level("WARNING", logger="birdframe"):
+        assert _make_image_client(_config(tmp_path, "gemeni")) is None
+    assert "Unknown image_provider" in caplog.text
