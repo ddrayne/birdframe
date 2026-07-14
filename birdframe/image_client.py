@@ -1,6 +1,7 @@
-"""Concrete image backend: OpenAI gpt-image family. Key comes from the Keychain.
+"""Concrete image backends: OpenAI gpt-image family and Google Gemini image
+models. Keys come from the Keychain.
 
-Note: the gpt-image models are slow (gpt-image-2 at good quality is ~2 minutes),
+Note: image generation is slow (gpt-image-2 at good quality is ~2 minutes),
 so callers should run generation off any request/UI thread.
 """
 from __future__ import annotations
@@ -50,6 +51,62 @@ class OpenAIImageClient:
                 return self._image_bytes(resp.data[0])
             except Exception as exc:
                 last = exc
+                if attempt < self.max_retries - 1:
+                    time.sleep(self.backoff * (attempt + 1))
+        raise last
+
+
+class GeminiImageClient:
+    # 4:5 exactly fills the frame's 1200x1500 art area (no letterbox bars).
+    ASPECT_RATIO = "4:5"
+
+    def __init__(self, api_key: str, model: str = "gemini-3-pro-image",
+                 quality: str = "high", sdk=None, max_retries: int = 3,
+                 backoff: float = 2.0, timeout: float = 300.0):
+        self.model = model
+        self.image_size = "2K" if quality == "high" else "1K"
+        self.max_retries = max_retries
+        self.backoff = backoff
+        if sdk is not None:
+            self._client = sdk
+        else:
+            from google import genai
+            # google-genai takes its HTTP timeout in milliseconds.
+            self._client = genai.Client(
+                api_key=api_key,
+                http_options={"timeout": int(timeout * 1000)})
+
+    def _image_bytes(self, resp) -> bytes:
+        for part in resp.candidates[0].content.parts:
+            inline = getattr(part, "inline_data", None)
+            if inline is not None and getattr(inline, "data", None):
+                data = inline.data
+                if isinstance(data, str):
+                    return base64.b64decode(data)
+                return data
+        # A 200 with no image (e.g. a text-only safety refusal) is a bug or a
+        # blocked prompt, not a transient error — don't burn paid retries on it.
+        raise RuntimeError("Gemini response contained no image part")
+
+    def generate(self, prompt: str) -> bytes:
+        last = None
+        for attempt in range(self.max_retries):
+            try:
+                resp = self._client.models.generate_content(
+                    model=self.model, contents=prompt,
+                    config={
+                        "response_modalities": ["TEXT", "IMAGE"],
+                        "image_config": {
+                            "aspect_ratio": self.ASPECT_RATIO,
+                            "image_size": self.image_size,
+                        },
+                    },
+                )
+                return self._image_bytes(resp)
+            except Exception as exc:
+                last = exc
+                if isinstance(exc, RuntimeError) and "no image part" in str(exc):
+                    raise
                 if attempt < self.max_retries - 1:
                     time.sleep(self.backoff * (attempt + 1))
         raise last
