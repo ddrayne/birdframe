@@ -266,6 +266,9 @@ def _doctor() -> int:
     config = Config.load()
     print("birdframe setup check\n")
     print(f"  location        {config.latitude}, {config.longitude}")
+    if config.image_provider not in ("openai", "gemini"):
+        print(f"  {warn} image provider  '{config.image_provider}' is not a valid image_provider — "
+              "use 'openai' or 'gemini' (art uses a text poster until fixed)")
     for provider, label in (("openai", "OpenAI key"), ("gemini", "Gemini key")):
         key = secrets.get_key(provider)
         active = provider == config.image_provider

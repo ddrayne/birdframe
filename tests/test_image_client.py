@@ -97,6 +97,18 @@ def test_gemini_no_image_part_raises_without_retry_burn(mocker):
     assert fake.models.generate_content.call_count == 1
 
 
+@pytest.mark.parametrize("candidates", [None, []])
+def test_gemini_blocked_prompt_raises_without_retry_burn(mocker, candidates):
+    """A fully blocked prompt returns no candidates at all (only
+    prompt_feedback) — a hard error, and must not burn paid retries."""
+    fake = mocker.Mock()
+    fake.models.generate_content.return_value = mocker.Mock(candidates=candidates)
+    client = GeminiImageClient(api_key="k", sdk=fake, max_retries=3, backoff=0)
+    with pytest.raises(NoImageError):
+        client.generate("p")
+    assert fake.models.generate_content.call_count == 1
+
+
 def test_gemini_retries_then_raises(mocker):
     fake = mocker.Mock()
     fake.models.generate_content.side_effect = RuntimeError("boom")

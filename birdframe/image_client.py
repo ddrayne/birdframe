@@ -84,7 +84,14 @@ class GeminiImageClient:
                 http_options={"timeout": int(timeout * 1000)})
 
     def _image_bytes(self, resp) -> bytes:
-        for part in resp.candidates[0].content.parts:
+        # A fully blocked prompt returns no candidates at all (only
+        # prompt_feedback) — same hard-error treatment as a text-only reply.
+        candidates = getattr(resp, "candidates", None)
+        content = candidates[0].content if candidates else None
+        parts = getattr(content, "parts", None) if content else None
+        if not parts:
+            raise NoImageError("Gemini response contained no candidates/parts")
+        for part in parts:
             inline = getattr(part, "inline_data", None)
             if inline is not None and getattr(inline, "data", None):
                 data = inline.data
