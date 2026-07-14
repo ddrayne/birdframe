@@ -28,6 +28,8 @@ DEFAULTS = {
     "style_mode": "responsive",    # responsive | rotate | pinned
     "pinned_style": "",
     "openai_model": "gpt-image-2",  # current flagship image model
+    "image_provider": "openai",    # openai | gemini — which paid painter to use
+    "gemini_model": "gemini-3-pro-image",  # Nano Banana Pro
     "image_quality": "high",
     "min_species_for_image": 1,    # below this, post the free poster (no paid call)
     "max_paid_images_per_day": 1,  # hard cap on paid gpt-image-1 calls per day
@@ -61,6 +63,8 @@ class Config:
     style_mode: str
     pinned_style: str
     openai_model: str
+    image_provider: str
+    gemini_model: str
     image_quality: str
     min_species_for_image: int
     max_paid_images_per_day: int

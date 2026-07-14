@@ -40,3 +40,15 @@ def test_unknown_keys_ignored_and_partial_file_merges_defaults(tmp_path):
     cfg = Config.load(path)
     assert cfg.confidence_threshold == 0.42
     assert cfg.post_time == "21:00"  # default filled in
+
+
+def test_image_provider_defaults(tmp_path):
+    cfg = Config.load(tmp_path / "config.toml")
+    assert cfg.image_provider == "openai"
+    assert cfg.gemini_model == "gemini-3-pro-image"
+
+
+def test_image_provider_from_toml(tmp_path):
+    p = tmp_path / "config.toml"
+    p.write_text('image_provider = "gemini"\n')
+    assert Config.load(p).image_provider == "gemini"
