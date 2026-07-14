@@ -4,6 +4,7 @@ const ENUMS = {
   post_mode: ['daily', 'live', 'manual'],
   style_mode: ['responsive', 'rotate', 'pinned'],
   image_quality: ['low', 'medium', 'high'],
+  image_provider: ['openai', 'gemini'],
 };
 
 function healthItem(ok, label, value) {
@@ -39,7 +40,7 @@ export async function renderSettings(token) {
       <div class="health-grid">
         ${healthItem(health.listening, 'Microphone', health.status)}
         ${healthItem(true, 'Last detection', ago(health.last_detection_ago_s))}
-        ${healthItem(health.openai_key_set, 'Image artist', health.openai_key_set ? 'OpenAI key ready' : 'fallback poster mode')}
+        ${healthItem(health.openai_key_set, 'Image artist', health.openai_key_set ? 'paint model ready' : 'fallback poster mode')}
         ${healthItem(true, 'Local archive', `${archiveMb} MB`)}
         ${healthItem(health.backup_count > 0, 'Database backups', health.backup_count ? health.backup_count + ' snapshots · ' + backupMb + ' MB' : 'first snapshot pending')}
       </div>

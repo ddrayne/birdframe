@@ -27,13 +27,15 @@ EDITABLE_SETTINGS = [
     ("Frame", ["frame_url", "frame_hold_minutes", "frame_saturation"]),
     ("Style", ["style_mode", "pinned_style"]),
     ("Detection", ["confidence_threshold", "min_species_confidence", "input_device"]),
-    ("Image", ["openai_model", "image_quality"]),
+    ("Image", ["image_provider", "openai_model", "gemini_model", "image_quality"]),
 ]
 RESTART_REQUIRED = {
-    "confidence_threshold", "input_device", "openai_model", "image_quality",
+    "confidence_threshold", "input_device",
     "latitude", "longitude", "geo_floor", "chunk_seconds",
     "chunk_overlap_seconds", "dashboard_port",
 }
+# The image settings (provider/model/quality) apply live: apply_settings
+# rebuilds the artist's image client from the saved config.
 # 'latitude'/'longitude' are floats but the settings-POST coercion handles them;
 # they rebuild the species whitelist on restart.
 

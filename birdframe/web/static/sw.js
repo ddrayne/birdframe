@@ -1,6 +1,6 @@
 // birdframe service worker — offline shell so the app opens even when the
 // Mac is briefly unreachable. Live data still needs the server.
-const CACHE = 'birdframe-v4';
+const CACHE = 'birdframe-v5';
 const SHELL = ['/', '/icon-192.png', '/manifest.webmanifest',
   '/static/app.css?v=4', '/static/js/app.js?v=4'];
 

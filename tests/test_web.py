@@ -200,6 +200,25 @@ def test_post_settings_saves_and_applies(tmp_path):
     assert Config.load(ctx.config.path).post_mode == "manual"
 
 
+def test_image_provider_editable_and_applies_live(tmp_path):
+    """Switching painters from the dashboard must not need a restart —
+    apply_settings rebuilds the artist's image client."""
+    _, ctx, client = _client(tmp_path)
+    data = client.get("/api/settings").json()
+    fields = {f["key"]: f for g in data["groups"] for f in g["fields"]}
+    assert "image_provider" in fields
+    assert "gemini_model" in fields
+    assert fields["image_provider"]["restart"] is False
+    assert fields["openai_model"]["restart"] is False
+    assert fields["image_quality"]["restart"] is False
+
+    resp = client.post("/api/settings", json={"image_provider": "gemini"})
+    assert resp.status_code == 200
+    assert resp.json()["restart_required"] == []
+    assert ctx.config.image_provider == "gemini"
+    assert ctx._applied == [True]                        # apply_settings ran
+
+
 def test_post_settings_rejects_bad_value_and_unknown_key(tmp_path):
     _, ctx, client = _client(tmp_path)
     resp = client.post("/api/settings", json={"max_paid_images_per_day": "lots"})

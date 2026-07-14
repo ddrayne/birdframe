@@ -77,6 +77,9 @@ img { max-width: 100%; }
   position: sticky;
   top: 0;
   z-index: 50;
+  /* Keep the brand clear of the iOS status bar in standalone/PWA mode
+     (viewport-fit=cover lets content slide under it otherwise). */
+  padding-top: env(safe-area-inset-top);
   border-bottom: 1px solid color-mix(in srgb, var(--line) 74%, transparent);
   background: color-mix(in srgb, var(--page) 90%, transparent);
   backdrop-filter: blur(18px) saturate(1.2);

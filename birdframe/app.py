@@ -207,6 +207,9 @@ def _start_dashboard(runtime: Runtime, config: Config) -> None:
         runtime.artist.min_species_confidence = config.min_species_confidence
         runtime.artist.style_mode = config.style_mode
         runtime.artist.pinned_style = config.pinned_style
+        # Rebuild the paid painter so provider/model/quality switches apply
+        # without a restart (cheap: clients are lazy, no network on construct).
+        runtime.artist.image_client = _make_image_client(config)
         runtime.publisher.frame_url = config.frame_url.rstrip("/")
         runtime.publisher.hold_minutes = config.frame_hold_minutes
         runtime.publisher.saturation = config.frame_saturation
