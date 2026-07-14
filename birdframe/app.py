@@ -62,6 +62,31 @@ def _start_caffeinate() -> None:
         log.warning("caffeinate unavailable: %s", exc)
 
 
+def _make_image_client(config: Config):
+    """The paid painter selected by config.image_provider, or None if that
+    provider's key is missing (the day then gets the free fallback poster)."""
+    try:
+        key = secrets.get_key(config.image_provider)
+    except ValueError:
+        log.warning("Unknown image_provider %r in config — pictures will use "
+                    "the fallback poster. Use 'openai' or 'gemini'.",
+                    config.image_provider)
+        return None
+    if not key:
+        log.warning(
+            "No %s key set — pictures will use the fallback poster. "
+            "Set one with: birdframe set-key %s",
+            config.image_provider, config.image_provider)
+        return None
+    if config.image_provider == "gemini":
+        from birdframe.image_client import GeminiImageClient
+        return GeminiImageClient(api_key=key, model=config.gemini_model,
+                                 quality=config.image_quality)
+    from birdframe.image_client import OpenAIImageClient
+    return OpenAIImageClient(api_key=key, model=config.openai_model,
+                             quality=config.image_quality)
+
+
 def build_runtime(config: Config) -> Runtime:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     store = Store(DATA_DIR / "birdframe.sqlite")
@@ -85,15 +110,7 @@ def build_runtime(config: Config) -> Runtime:
     )
     log.info("Whitelist: %d plausible local species", len(detector.whitelist))
 
-    api_key = secrets.get_openai_key()
-    image_client = None
-    if api_key:
-        from birdframe.image_client import OpenAIImageClient
-        image_client = OpenAIImageClient(api_key=api_key, model=config.openai_model,
-                                         quality=config.image_quality)
-    else:
-        log.warning("No OpenAI key set — pictures will use the fallback poster. "
-                    "Set one with: birdframe set-key")
+    image_client = _make_image_client(config)
 
     artist = Artist(
         store=store, styles=load_styles(), image_client=image_client,
@@ -224,16 +241,20 @@ def _start_dashboard(runtime: Runtime, config: Config) -> None:
         log.info("On your network at http://%s:%d", lan_ip, config.dashboard_port)
 
 
-def _set_key_interactive() -> int:
-    """`birdframe set-key` — prompt for the OpenAI key without echoing it or
-    leaving it in shell history, then store it in the macOS Keychain."""
+def _set_key_interactive(provider: str = "openai") -> int:
+    """`birdframe set-key [openai|gemini]` — prompt for the key without echoing
+    it or leaving it in shell history, then store it in the macOS Keychain."""
     import getpass
 
-    key = getpass.getpass("OpenAI API key (input hidden): ").strip()
+    if provider not in ("openai", "gemini"):
+        print(f"Unknown provider {provider!r} — use 'openai' or 'gemini'.")
+        return 1
+    label = {"openai": "OpenAI", "gemini": "Gemini"}[provider]
+    key = getpass.getpass(f"{label} API key (input hidden): ").strip()
     if not key:
         print("No key entered — nothing changed.")
         return 1
-    secrets.set_openai_key(key)
+    secrets.set_key(provider, key)
     print("Saved to the macOS Keychain. birdframe will use it on next run.")
     return 0
 
@@ -245,9 +266,16 @@ def _doctor() -> int:
     config = Config.load()
     print("birdframe setup check\n")
     print(f"  location        {config.latitude}, {config.longitude}")
-    key = secrets.get_openai_key()
-    print(f"  {ok if key else warn} OpenAI key     "
-          + ("set" if key else "missing — run 'birdframe set-key' (art uses a text poster without it)"))
+    for provider, label in (("openai", "OpenAI key"), ("gemini", "Gemini key")):
+        key = secrets.get_key(provider)
+        active = provider == config.image_provider
+        if key:
+            print(f"  {ok} {label:<14} set" + ("  (selected painter)" if active else ""))
+        elif active:
+            print(f"  {warn} {label:<14} missing — run 'birdframe set-key {provider}' "
+                  "(art uses a text poster without it)")
+        else:
+            print(f"    {label:<14} not set (not selected)")
     try:
         import sounddevice as sd
         default_in = sd.query_devices(kind="input")["name"]
@@ -293,7 +321,7 @@ def _run_service(cmd: str) -> int:
 def main() -> None:
     argv = sys.argv[1:]
     if argv and argv[0] == "set-key":
-        raise SystemExit(_set_key_interactive())
+        raise SystemExit(_set_key_interactive(argv[1] if len(argv) > 1 else "openai"))
     if argv and argv[0] == "doctor":
         raise SystemExit(_doctor())
     if argv and argv[0] == "backup":
@@ -303,8 +331,8 @@ def main() -> None:
     if argv and argv[0] in ("-h", "--help"):
         print("Usage: birdframe [command]\n\n"
               "  (no args)  run the listener, menu bar, and dashboard in the foreground\n"
-              "  set-key    store your OpenAI API key in the macOS Keychain\n"
-              "  doctor     check location, key, microphone and frame\n"
+              "  set-key [openai|gemini]  store an API key in the macOS Keychain (default: openai)\n"
+              "  doctor     check location, keys, microphone and frame\n"
               "  backup     create a restore-ready database snapshot now\n\n"
               "Run it forever (background service):\n"
               "  install    start at login and keep running (LaunchAgent)\n"
