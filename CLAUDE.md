@@ -5,8 +5,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 **birdframe** — a macOS app that listens continuously to birds outside a window
-in Edinburgh (BirdNET), and each day paints the detected species with OpenAI
-gpt-image-1, posting a 1200×1600 picture to a shared Inky Frame e-ink display
+in Edinburgh (BirdNET), and each day paints the detected species with an image
+model (OpenAI gpt-image or Gemini, chosen by `image_provider` in config),
+posting a 1200×1600 picture to a shared Inky Frame e-ink display
 and archiving it locally. Design and the task-by-task implementation plan live
 in `docs/plans/2026-07-05-birdframe-*.md`.
 
@@ -20,6 +21,7 @@ uv run pytest tests/test_scheduler.py::test_daily_fires_once_at_post_time -v   #
 BIRDFRAME_SMOKE=1 uv run pytest tests/test_smoke.py -s   # opt-in real-model check (needs tests/fixtures/robin.wav)
 uv run birdframe                    # run the app (menu bar + dashboard); grants mic access on first launch
 uv run birdframe set-key            # store the OpenAI key in the Keychain (hidden prompt)
+uv run birdframe set-key gemini     # same, for the Gemini key
 bash packaging/install.sh           # install the LaunchAgent to run forever
 ```
 
@@ -34,10 +36,15 @@ There is no separate lint/typecheck step configured; pytest is the gate.
   `birdnet.load(...)`, cached under `~/.cache`. First run is slow; Zenodo
   outages surface as `Failed to download ... Status code: 500` — that's their
   server, not the code.
-- **Secrets never touch disk.** `secrets.get_openai_key()` resolves the OpenAI
-  key from the `OPENAI_API_KEY` env var first, then the macOS Keychain. Users
-  set it with `birdframe set-key` (hidden `getpass` prompt → Keychain). Config
-  TOML holds everything else. Don't add a config field for the key.
+- **Secrets never touch disk.** `secrets.get_key(provider)` resolves each
+  provider's key from its env var first (`OPENAI_API_KEY` / `GEMINI_API_KEY`),
+  then the macOS Keychain. Users set them with `birdframe set-key [openai|gemini]`
+  (hidden `getpass` prompt → Keychain). Config TOML holds everything else.
+  Don't add a config field for keys. Narration (`narrator.py`) always needs the
+  OpenAI key, regardless of `image_provider`. Keychain items MUST be created via
+  `birdframe set-key` (Python keyring), never the `security` CLI — an item
+  created by `security` isn't on Python's ACL, so `keyring.get_password` blocks
+  forever on a GUI authorization prompt the headless app can never answer.
 
 ## Architecture
 
@@ -72,9 +79,12 @@ Key design boundaries worth preserving:
   treats HTTP 409 (held by someone else) as "leave it be". Every image is
   archived locally first, so an unreachable frame loses nothing. Don't add retry
   logic that would re-stomp the frame hours later.
-- **Artist always produces an image.** If gpt-image-1 fails (or no key is set),
-  `artist.generate()` falls back to a pure-Pillow typographic poster and labels
-  the style `"<name> (fallback)"`. The frame never misses its daily report.
+- **Artist always produces an image.** The paid painter is duck-typed
+  (`image_client.py`: `OpenAIImageClient` or `GeminiImageClient`, selected by
+  `config.image_provider` in `app._make_image_client`). If it fails (or no key
+  is set), `artist.generate()` falls back to a pure-Pillow typographic poster
+  and labels the style `"<name> (fallback)"`. The frame never misses its daily
+  report.
 
 Output is always exactly **1200×1600** (`compose.FRAME_W/FRAME_H`): art fills
 the top 1500px, a caption strip (date + species) the bottom 100px.
