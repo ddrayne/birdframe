@@ -11,12 +11,112 @@ function healthItem(ok, label, value) {
   return `<div class="health-item soft-card"><b><i class="health-dot ${ok ? '' : 'bad'}"></i>${esc(label)}</b><span>${esc(value)}</span></div>`;
 }
 
+// ── Posting schedule editor ──────────────────────────────────────────────────
+// The config stores a plain string ("06:30 dawn, 12:00, 21:00 evening"); this
+// widget is just a friendlier hand on the same value — a hidden input carries
+// it through the ordinary settings save.
+
+const SCHEDULE_PRESETS = [
+  ['Once a day', '21:00 evening'],
+  ['Twice a day', '08:00 morning, 20:00 evening'],
+  ['Dawn to dusk', '06:30 dawn, 12:00 midday, 20:30 dusk'],
+  ['Full day', '06:30 dawn, 12:00 midday, 15:30 afternoon, 18:30 evening, 21:00 dusk'],
+];
+
+function parseSchedule(value) {
+  return (value || '').split(',').map(part => {
+    const m = part.trim().match(/^(\d{1,2}):(\d{2})(?:\s+(.*\S))?$/);
+    if (!m) return null;
+    return {time: `${m[1].padStart(2, '0')}:${m[2]}`, label: m[3] || ''};
+  }).filter(Boolean);
+}
+
+function serializeSchedule(slots) {
+  return slots.map(s => (s.label ? `${s.time} ${s.label}` : s.time)).join(', ');
+}
+
+function scheduleRow(slot) {
+  return `<div class="schedule-row">
+    <input type="time" class="slot-time" value="${attr(slot.time)}" required>
+    <input type="text" class="slot-label" value="${attr(slot.label)}" placeholder="label — dawn, midday…" maxlength="24">
+    <button type="button" class="round-button slot-remove" title="Remove this time" aria-label="Remove this time">×</button>
+  </div>`;
+}
+
+function scheduleEditor(value) {
+  const slots = parseSchedule(value);
+  if (!slots.length) slots.push({time: '21:00', label: 'evening'});
+  return `<div class="field schedule-field"><div>
+      <label for="scheduleRows">Posting schedule</label>
+      <small>Applies live · each time paints the birds heard so far that day</small>
+    </div>
+    <div class="schedule-editor" id="scheduleEditor">
+      <input type="hidden" data-key="post_times" id="postTimesValue" value="${attr(serializeSchedule(slots))}">
+      <div class="schedule-presets">${SCHEDULE_PRESETS.map(([name, preset]) =>
+        `<button type="button" class="preset-chip" data-preset="${attr(preset)}">${esc(name)}</button>`).join('')}</div>
+      <div class="schedule-rows" id="scheduleRows">${slots.map(scheduleRow).join('')}</div>
+      <div class="button-row">
+        <button type="button" class="btn secondary small" id="addSlot">+ Add a time</button>
+        <span class="section-note" id="scheduleSummary"></span>
+      </div>
+    </div>
+  </div>`;
+}
+
+function wireScheduleEditor() {
+  const editor = document.querySelector('#scheduleEditor');
+  if (!editor) return;
+  const rows = editor.querySelector('#scheduleRows');
+  const hidden = editor.querySelector('#postTimesValue');
+  const summary = editor.querySelector('#scheduleSummary');
+
+  const currentSlots = () => [...rows.querySelectorAll('.schedule-row')].map(row => ({
+    time: row.querySelector('.slot-time').value,
+    label: row.querySelector('.slot-label').value.trim().replace(/,/g, ' '),
+  })).filter(s => s.time);
+
+  const sync = () => {
+    const slots = currentSlots();
+    hidden.value = serializeSchedule(slots);
+    const times = slots.map(s => s.time);
+    const dupes = times.filter((t, i) => times.indexOf(t) !== i);
+    summary.textContent = dupes.length
+      ? `Two posts share ${dupes[0]} — remove one.`
+      : `${slots.length} post${slots.length === 1 ? '' : 's'} a day.`;
+    rows.querySelectorAll('.slot-remove').forEach(btn => { btn.disabled = slots.length <= 1; });
+    editor.querySelectorAll('.preset-chip').forEach(chip => {
+      chip.classList.toggle('active', chip.dataset.preset === hidden.value);
+    });
+  };
+
+  editor.addEventListener('click', event => {
+    const preset = event.target.closest('.preset-chip');
+    if (preset) {
+      rows.innerHTML = parseSchedule(preset.dataset.preset).map(scheduleRow).join('');
+      sync();
+      return;
+    }
+    if (event.target.closest('#addSlot')) {
+      rows.insertAdjacentHTML('beforeend', scheduleRow({time: '12:00', label: ''}));
+      rows.lastElementChild.querySelector('.slot-time').focus();
+      sync();
+      return;
+    }
+    const remove = event.target.closest('.slot-remove');
+    if (remove && !remove.disabled) { remove.closest('.schedule-row').remove(); sync(); }
+  });
+  editor.addEventListener('input', sync);
+  sync();
+}
+
 function settingField(field) {
   const label = field.key.replaceAll('_', ' ');
   const note = field.restart ? 'Applies after restart' : 'Applies live';
   let control;
   if (ENUMS[field.key]) {
     control = `<select id="setting-${attr(field.key)}" data-key="${attr(field.key)}">${ENUMS[field.key].map(value => `<option value="${attr(value)}" ${String(field.value) === value ? 'selected' : ''}>${esc(value)}</option>`).join('')}</select>`;
+  } else if (field.key === 'post_times') {
+    return scheduleEditor(field.value);
   } else {
     const type = typeof field.value === 'number' ? 'number' : field.key.includes('time') ? 'time' : 'text';
     const step = typeof field.value === 'number' && !Number.isInteger(field.value) ? ' step="any"' : '';
@@ -67,6 +167,7 @@ export async function renderSettings(token) {
     </div>
   </article>`;
 
+  wireScheduleEditor();
   document.querySelector('#settingsForm').addEventListener('submit', async event => {
     event.preventDefault();
     const body = {};

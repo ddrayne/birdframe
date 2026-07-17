@@ -39,3 +39,19 @@ def test_compose_handles_very_long_species_list():
     out = compose_final(art, date=datetime(2026, 7, 5),
                         species=[f"Species number {i}" for i in range(30)])
     assert Image.open(io.BytesIO(out)).size == (1200, 1600)
+
+
+def test_caption_label_renders_differently():
+    from birdframe.compose import compose_final, fallback_poster
+    from datetime import datetime
+    import io
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (1024, 1536), (90, 110, 90)).save(buf, format="PNG")
+    art = buf.getvalue()
+    when = datetime(2026, 7, 5, 6, 30)
+    plain = compose_final(art, when, ["European Robin"])
+    labelled = compose_final(art, when, ["European Robin"], label="dawn")
+    assert plain != labelled                     # the label is drawn in the caption
+    assert fallback_poster(when, ["European Robin"]) != \
+        fallback_poster(when, ["European Robin"], label="dawn")

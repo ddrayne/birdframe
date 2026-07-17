@@ -136,3 +136,131 @@ def test_runtime_ensures_one_daily_online_backup(tmp_path):
     assert len(list(rt.backup_dir.glob("*.sqlite"))) == 1
     assert rt.ensure_backup(datetime(2026, 7, 13, 18)) is None
     assert len(list(rt.backup_dir.glob("*.sqlite"))) == 1
+
+
+# ── scheduled posts: slot handling, poster guard, unchanged skip ─────────────
+
+class _Res:
+    def __init__(self, s): self.status = s; self.detail = ""
+
+
+class _Pub:
+    def __init__(self): self.calls = 0
+    def publish(self, png, force=False): self.calls += 1; return _Res("posted")
+
+
+def _sched_rt(tmp_path, artist, now, post_times="06:30 dawn, 21:00 evening"):
+    from types import SimpleNamespace
+    store = Store(tmp_path / "db.sqlite")
+    rt = Runtime.for_test(store=store, detector=None, now=now)
+    rt.artist, rt.publisher = artist, _Pub()
+    rt.config = SimpleNamespace(
+        post_mode="daily", post_times=post_times, post_time="21:00",
+        live_min_gap_minutes=120, live_window_start="08:00",
+        live_window_end="22:00", daily_restart_hour=-1, backup_keep_days=0,
+    )
+    notes = []
+    rt.notify = lambda title, msg: notes.append(title)
+    return store, rt, notes
+
+
+def test_scheduled_poster_never_replaces_a_real_painting(tmp_path):
+    """THE bug fix: budget spent → fallback poster generated → but a real
+    painting already sits on the frame today, so the slot skips + notifies."""
+    from datetime import datetime as _dt
+    img = tmp_path / "poster.png"; img.write_bytes(b"PNG")
+
+    store = None  # closed over below
+
+    class Art:
+        def generate(self, when, trigger="manual", slot_label="", **kw):
+            rid = store.add_image(when, str(img), "riso (fallback)", "p", ["Robin"],
+                                  trigger=trigger)
+            return store.get_image(rid)
+
+    store, rt, notes = _sched_rt(tmp_path, Art(), now=lambda: _dt(2026, 7, 5, 21, 0))
+    # a real painting was posted at dawn
+    real = store.add_image(_dt(2026, 7, 5, 6, 30), str(img), "linocut", "p", ["Robin"])
+    store.mark_posted(real, _dt(2026, 7, 5, 6, 31))
+    rt.tick(_dt(2026, 7, 5, 21, 0))
+    assert rt.publisher.calls == 0                # poster NOT posted over the painting
+    assert notes                                  # user was told why
+    assert rt.last_post == _dt(2026, 7, 5, 21, 0) # slot handled; won't refire
+
+
+def test_scheduled_poster_posts_on_an_empty_day(tmp_path):
+    """First edition of a quiet day: nothing real posted yet → the poster still
+    goes up (the frame never misses its daily report)."""
+    from datetime import datetime as _dt
+    img = tmp_path / "poster.png"; img.write_bytes(b"PNG")
+    store = None
+
+    class Art:
+        def generate(self, when, trigger="manual", slot_label="", **kw):
+            rid = store.add_image(when, str(img), "riso (fallback)", "p", ["Robin"],
+                                  trigger=trigger)
+            return store.get_image(rid)
+
+    store, rt, notes = _sched_rt(tmp_path, Art(), now=lambda: _dt(2026, 7, 5, 6, 30))
+    rt.tick(_dt(2026, 7, 5, 6, 30))
+    assert rt.publisher.calls == 1
+
+
+def test_unchanged_species_slot_skips_republish(tmp_path):
+    """Artist reuse returned an already-posted painting → nothing new to say →
+    skip quietly with a notification."""
+    from datetime import datetime as _dt
+    img = tmp_path / "pic.png"; img.write_bytes(b"PNG")
+    store = None
+    rec_holder = {}
+
+    class Art:
+        def generate(self, when, trigger="manual", slot_label="", **kw):
+            return store.get_image(rec_holder["id"])   # the reuse path
+
+    store, rt, notes = _sched_rt(tmp_path, Art(), now=lambda: _dt(2026, 7, 5, 21, 0))
+    rec_holder["id"] = store.add_image(_dt(2026, 7, 5, 6, 30), str(img),
+                                       "linocut", "p", ["Robin"])
+    store.mark_posted(rec_holder["id"], _dt(2026, 7, 5, 6, 31))
+    rt.tick(_dt(2026, 7, 5, 21, 0))
+    assert rt.publisher.calls == 0
+    assert notes
+    # and the slot does not re-fire on the next tick
+    rt.tick(_dt(2026, 7, 5, 21, 1))
+    assert rt.publisher.calls == 0
+
+
+def test_slot_label_threaded_to_artist(tmp_path):
+    from datetime import datetime as _dt
+    img = tmp_path / "pic.png"; img.write_bytes(b"PNG")
+    store = None
+    seen = {}
+
+    class Art:
+        def generate(self, when, trigger="manual", slot_label="", **kw):
+            seen["trigger"], seen["label"] = trigger, slot_label
+            rid = store.add_image(when, str(img), "linocut", "p", ["Robin"],
+                                  trigger=trigger)
+            return store.get_image(rid)
+
+    store, rt, notes = _sched_rt(tmp_path, Art(), now=lambda: _dt(2026, 7, 5, 6, 30))
+    rt.tick(_dt(2026, 7, 5, 6, 30))
+    assert seen == {"trigger": "scheduled", "label": "dawn"}
+    assert rt.publisher.calls == 1
+
+
+def test_restart_rehydrates_last_post_from_store(tmp_path):
+    """A mid-day restart must not re-fire an already-handled slot."""
+    from datetime import datetime as _dt
+    store = Store(tmp_path / "db.sqlite")
+    img = tmp_path / "pic.png"; img.write_bytes(b"PNG")
+    rid = store.add_image(_dt(2026, 7, 5, 6, 30), str(img), "linocut", "p", ["Robin"])
+    store.mark_posted(rid, _dt(2026, 7, 5, 6, 31))
+
+    class Art:
+        def generate(self, **kw):
+            raise AssertionError("should not generate — slot already handled")
+
+    rt = Runtime(config=None, store=store, detector=None, artist=Art(),
+                 publisher=None, now=lambda: _dt(2026, 7, 5, 7, 0))
+    assert rt.last_post == _dt(2026, 7, 5, 6, 31)

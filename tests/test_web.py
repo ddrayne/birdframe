@@ -571,3 +571,28 @@ def test_frame_status_proxy(tmp_path, mocker):
                                                  json=lambda: {"busy": False, "source": "birdframe"}))
     d = client.get("/api/frame/status").json()
     assert d["reachable"] is True and d["source"] == "birdframe"
+
+
+def test_post_times_editable_and_validated(tmp_path):
+    _, ctx, client = _client(tmp_path)
+    data = client.get("/api/settings").json()
+    keys = {f["key"] for g in data["groups"] for f in g["fields"]}
+    assert "post_times" in keys
+    assert "post_time" not in keys          # superseded by the schedule string
+    # a valid multi-slot schedule saves and applies live
+    resp = client.post("/api/settings",
+                       json={"post_times": "06:30 dawn, 12:00, 21:00 evening"})
+    assert resp.status_code == 200
+    assert ctx.config.post_times == "06:30 dawn, 12:00, 21:00 evening"
+    # an unparseable schedule is rejected with a field error
+    resp = client.post("/api/settings", json={"post_times": "gibberish, 25:99"})
+    assert resp.status_code == 400
+    assert "post_times" in resp.json()["fields"]
+
+
+def test_settings_groups_carry_name(tmp_path):
+    # settings.js reads group.name; the API used to send "group" so headings
+    # rendered blank.
+    _, _, client = _client(tmp_path)
+    data = client.get("/api/settings").json()
+    assert all("name" in g and g["name"] for g in data["groups"])

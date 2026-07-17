@@ -122,6 +122,8 @@ def build_runtime(config: Config) -> Runtime:
         min_species_confidence=config.min_species_confidence,
         geo_lookup=getattr(detector, "geo_by_scientific", {}),
     )
+    from birdframe.scheduler import parse_slots
+    artist.scheduled_slot_count = len(parse_slots(config.post_times, config.post_time))
     publisher = Publisher(
         frame_url=config.frame_url, hold_minutes=config.frame_hold_minutes,
         saturation=config.frame_saturation,
@@ -204,6 +206,10 @@ def _start_dashboard(runtime: Runtime, config: Config) -> None:
         runtime.detector.blocklist = set(config.blocked_species or ())
         runtime.artist.min_species_for_image = config.min_species_for_image
         runtime.artist.max_paid_images_per_day = config.max_paid_images_per_day
+        # The schedule is the budget: each slot may spend one paid render.
+        from birdframe.scheduler import parse_slots
+        runtime.artist.scheduled_slot_count = len(
+            parse_slots(config.post_times, config.post_time))
         runtime.artist.min_species_confidence = config.min_species_confidence
         runtime.artist.style_mode = config.style_mode
         runtime.artist.pinned_style = config.pinned_style

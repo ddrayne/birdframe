@@ -595,3 +595,17 @@ select { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .001ms !important; }
 }
+
+/* ── posting schedule editor ── */
+.schedule-field { grid-template-columns: 1fr; }
+.schedule-editor { display: flex; flex-direction: column; gap: 12px; }
+.schedule-presets { display: flex; flex-wrap: wrap; gap: 8px; }
+.preset-chip { border: 1px solid var(--line); background: var(--surface); color: var(--ink-soft);
+  border-radius: 999px; padding: 7px 13px; cursor: pointer; font-size: 12px; font-weight: 650; }
+.preset-chip:hover { border-color: var(--forest); color: var(--forest); }
+.preset-chip.active { background: var(--forest-soft, #dcebe1); border-color: var(--forest); color: var(--forest); }
+.schedule-rows { display: flex; flex-direction: column; gap: 8px; }
+.schedule-row { display: grid; grid-template-columns: minmax(110px, 130px) 1fr 34px; gap: 10px; align-items: center; }
+.schedule-row input[type="time"] { font-variant-numeric: tabular-nums; }
+.schedule-row .slot-remove { font-size: 16px; line-height: 1; }
+.schedule-row .slot-remove:disabled { opacity: .35; cursor: default; }

@@ -203,3 +203,47 @@ def test_journal_day_and_pattern_aggregates(tmp_path):
     assert robin_only["hour_species"][5]["species"][0]["common_name"] == "European Robin"
     assert len(robin_only["heatmap"]) == 2
     assert robin_only["heatmap"][0]["species"][5]["species_count"] == 1
+
+
+def test_trigger_roundtrip_and_migration(tmp_path):
+    s = Store(tmp_path / "db.sqlite")
+    plain = s.add_image(datetime(2026, 7, 5, 21), "/tmp/a.png", "ukiyo-e", "p", ["Robin"])
+    manual = s.add_image(datetime(2026, 7, 5, 22), "/tmp/b.png", "linocut", "p", ["Robin"],
+                         trigger="manual")
+    assert s.get_image(plain).trigger is None       # legacy rows stay NULL
+    assert s.get_image(manual).trigger == "manual"
+
+
+def test_count_paid_images_ignores_manual_and_studio(tmp_path):
+    s = Store(tmp_path / "db.sqlite")
+    when = datetime(2026, 7, 5, 12)
+    s.add_image(when, "/tmp/a.png", "ukiyo-e", "p", ["Robin"], trigger="manual")
+    s.add_image(when, "/tmp/b.png", "linocut", "p", ["Robin"], trigger="studio")
+    assert s.count_paid_images_for_day(when) == 0   # user actions don't eat the budget
+    s.add_image(when, "/tmp/c.png", "cyanotype", "p", ["Robin"], trigger="scheduled")
+    s.add_image(when, "/tmp/d.png", "field-guide", "p", ["Robin"])          # legacy NULL
+    s.add_image(when, "/tmp/e.png", "riso (fallback)", "p", ["Robin"], trigger="scheduled")
+    assert s.count_paid_images_for_day(when) == 2   # scheduled + legacy; fallback free
+
+
+def test_last_posted_at(tmp_path):
+    s = Store(tmp_path / "db.sqlite")
+    assert s.last_posted_at() is None
+    a = s.add_image(datetime(2026, 7, 5, 6), "/tmp/a.png", "ukiyo-e", "p", ["Robin"])
+    s.mark_posted(a, datetime(2026, 7, 5, 6, 31))
+    b = s.add_image(datetime(2026, 7, 5, 12), "/tmp/b.png", "linocut", "p", ["Robin"])
+    s.mark_posted(b, datetime(2026, 7, 5, 12, 1))
+    assert s.last_posted_at() == datetime(2026, 7, 5, 12, 1)
+
+
+def test_real_posted_on_day_excludes_fallbacks_and_unposted(tmp_path):
+    s = Store(tmp_path / "db.sqlite")
+    day = "2026-07-05"
+    assert s.real_posted_on_day(day) is False
+    poster = s.add_image(datetime(2026, 7, 5, 6), "/tmp/a.png", "riso (fallback)", "p", ["Robin"])
+    s.mark_posted(poster, datetime(2026, 7, 5, 6, 31))
+    assert s.real_posted_on_day(day) is False       # a poster is not a painting
+    real = s.add_image(datetime(2026, 7, 5, 12), "/tmp/b.png", "linocut", "p", ["Robin"])
+    assert s.real_posted_on_day(day) is False       # generated but never posted
+    s.mark_posted(real, datetime(2026, 7, 5, 12, 1))
+    assert s.real_posted_on_day(day) is True

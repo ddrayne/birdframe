@@ -38,6 +38,9 @@ class Artist:
         self.max_paid_images_per_day = max_paid_images_per_day
         self.min_species_confidence = min_species_confidence
         self.geo_lookup = geo_lookup or {}
+        # Synced from the posting schedule (app.apply_settings): the schedule
+        # itself is the budget — N slots may spend up to N paid renders a day.
+        self.scheduled_slot_count = 1
 
     def _reliable(self, species_days):
         """Keep only birds trustworthy AND plausible enough for the picture —
@@ -50,12 +53,14 @@ class Artist:
                 out.append(s)
         return out
 
-    def _may_spend(self, species_count: int, when: datetime, force_paid: bool) -> bool:
-        """Whether a paid gpt-image-1 call is allowed right now.
+    def _may_spend(self, species_count: int, when: datetime, force_paid: bool,
+                   trigger: str = "manual") -> bool:
+        """Whether a paid image-model call is allowed right now.
 
         A real render costs money, so an *automatic* post only spends when there
         is an image client, the day cleared the species threshold, and we are
-        still under the daily paid-image cap. An explicit user action
+        still under the daily paid-image cap. Scheduled posts get one render per
+        slot — the schedule itself is the budget. An explicit user action
         (force_paid, e.g. clicking Post Now) bypasses the threshold and cap.
         """
         if self.image_client is None:
@@ -64,7 +69,10 @@ class Artist:
             return True
         if species_count < self.min_species_for_image:
             return False
-        return self.store.count_paid_images_for_day(when) < self.max_paid_images_per_day
+        cap = self.max_paid_images_per_day
+        if trigger == "scheduled":
+            cap = max(cap, self.scheduled_slot_count)
+        return self.store.count_paid_images_for_day(when) < cap
 
     def _pick_style(self, style_name, when, profile=None):
         """A specific style by name if asked for (for style testing), else the
@@ -120,7 +128,9 @@ class Artist:
     def generate(self, when: datetime, force_paid: bool = False,
                  species_days=None, style_name: str | None = None,
                  force_new: bool = False,
-                 created_at: datetime | None = None) -> ImageRecord | None:
+                 created_at: datetime | None = None,
+                 trigger: str = "manual",
+                 slot_label: str = "") -> ImageRecord | None:
         """Paint a picture of the given birds. Returns None when there are no
         reliable birds to show. Normally reuses an existing picture of the same
         birds today (no dupe, no respend); `force_new` (or asking for a specific
@@ -157,19 +167,20 @@ class Artist:
 
         style_label = style.name
         final = None
-        spend = self._may_spend(len(species_days), created_at, force_paid)
-        log.info("Artist: %d species, force=%s, image_client=%s, spending=%s",
-                 len(species_names), force_paid, self.image_client is not None, spend)
+        spend = self._may_spend(len(species_days), created_at, force_paid, trigger)
+        log.info("Artist: %d species, trigger=%s, force=%s, image_client=%s, spending=%s",
+                 len(species_names), trigger, force_paid,
+                 self.image_client is not None, spend)
         if spend:
             try:
                 art_bytes = self.image_client.generate(prompt)
-                final = compose_final(art_bytes, when, species_names)
+                final = compose_final(art_bytes, when, species_names, label=slot_label)
             except Exception as exc:
                 log.warning("Image generation failed (%s: %s) — using fallback poster",
                             type(exc).__name__, exc)
                 final = None  # fall through to the free poster
         if final is None:
-            final = fallback_poster(when, species_names)
+            final = fallback_poster(when, species_names, label=slot_label)
             style_label = f"{style.name} (fallback)"
             # Don't pile up identical fallback posters; reuse an existing one
             # (unless the caller explicitly wants a fresh entry).
@@ -182,6 +193,6 @@ class Artist:
         image_id = self.store.add_image(
             created_at, str(path), style_label, prompt, species_names,
             source_day=source_day, style_reason=reason,
-            art_profile=profile_to_dict(profile),
+            art_profile=profile_to_dict(profile), trigger=trigger,
         )
         return self.store.get_image(image_id)

@@ -19,7 +19,7 @@ STATIC = Path(__file__).resolve().parent / "static"
 # is applied to the running app immediately.
 EDITABLE_SETTINGS = [
     ("Location", ["latitude", "longitude"]),
-    ("Posting", ["post_mode", "post_time"]),
+    ("Posting", ["post_mode", "post_times"]),
     ("Live mode", ["live_min_gap_minutes", "live_window_start", "live_window_end"]),
     ("Cost controls", ["min_species_for_image", "max_paid_images_per_day"]),
     ("Storage", ["backup_keep_days", "archive_keep_days"]),
@@ -966,7 +966,7 @@ def create_app(ctx: AppContext) -> FastAPI:
     def get_settings():
         cfg = ctx.config
         groups = [
-            {"group": group,
+            {"name": group,
              "fields": [{"key": k, "value": getattr(cfg, k),
                          "restart": k in RESTART_REQUIRED} for k in keys]}
             for group, keys in EDITABLE_SETTINGS
@@ -989,6 +989,14 @@ def create_app(ctx: AppContext) -> FastAPI:
             except (TypeError, ValueError):
                 errors[key] = f"expected {type(getattr(cfg, key)).__name__}"
                 continue
+            if key == "post_times" and coerced.strip():
+                from birdframe.scheduler import parse_slots
+                slots = parse_slots(coerced, "")
+                parts = [p for p in coerced.split(",") if p.strip()]
+                if slots == [("", "")] or len(slots) < len(parts):
+                    errors[key] = ('could not read every entry — use times like '
+                                   '"06:30 dawn, 12:00, 21:00 evening"')
+                    continue
             setattr(cfg, key, coerced)
             saved.append(key)
             if key in RESTART_REQUIRED:

@@ -40,6 +40,7 @@ class ImageRecord:
     source_day: str | None = None
     style_reason: str = ""
     art_profile: dict | None = None
+    trigger: str | None = None
 
 
 _ISO = "%Y-%m-%dT%H:%M:%S"
@@ -119,6 +120,10 @@ class Store:
                 ("source_day", "TEXT"),
                 ("style_reason", "TEXT NOT NULL DEFAULT ''"),
                 ("art_profile", "TEXT"),
+                # Who asked for the render: scheduled | live | manual | studio.
+                # Legacy rows stay NULL; the paid-image budget counts only
+                # automatic renders, so user actions never starve the schedule.
+                ("trigger", "TEXT"),
             ):
                 if name not in image_columns:
                     self._conn.execute(f"ALTER TABLE images ADD COLUMN {name} {definition}")
@@ -728,14 +733,17 @@ class Store:
 
     def add_image(self, generated_at, path, style, prompt, species,
                   source_day: str | None = None, style_reason: str = "",
-                  art_profile: dict | None = None) -> int:
+                  art_profile: dict | None = None,
+                  trigger: str | None = None) -> int:
         with self._lock, self._conn:
             cur = self._conn.execute(
                 "INSERT INTO images (generated_at, path, style, prompt, species,"
-                " source_day, style_reason, art_profile) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                " source_day, style_reason, art_profile, trigger)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (generated_at.strftime(_ISO), path, style, prompt, json.dumps(species),
                  source_day or generated_at.strftime("%Y-%m-%d"), style_reason,
-                 json.dumps(art_profile) if art_profile is not None else None),
+                 json.dumps(art_profile) if art_profile is not None else None,
+                 trigger),
             )
             return cur.lastrowid
 
@@ -751,18 +759,43 @@ class Store:
             source_day=r["source_day"] or r["generated_at"][:10],
             style_reason=r["style_reason"] or "",
             art_profile=json.loads(r["art_profile"]) if r["art_profile"] else None,
+            trigger=r["trigger"],
         )
 
     def count_paid_images_for_day(self, when: datetime) -> int:
-        """Images generated on this day via a real (paid) render — fallback
-        posters are labelled '... (fallback)' and are free, so exclude them."""
+        """Paid renders that count against the automatic budget today.
+
+        Fallback posters are free. Manual/studio renders are explicit user
+        actions and don't count either — otherwise a 'paint this moment' click
+        would starve the scheduled posts into posting posters. Legacy rows
+        (NULL trigger) still count, conservatively."""
         day = when.strftime("%Y-%m-%d")
         row = self._conn.execute(
             "SELECT COUNT(*) AS n FROM images WHERE substr(generated_at, 1, 10) = ?"
-            " AND style NOT LIKE '%(fallback)%'",
+            " AND style NOT LIKE '%(fallback)%'"
+            " AND (trigger IS NULL OR trigger IN ('scheduled', 'live'))",
             (day,),
         ).fetchone()
         return row["n"]
+
+    def last_posted_at(self) -> datetime | None:
+        """When the most recent image actually landed on the frame — used to
+        rehydrate the scheduler after a restart so a slot doesn't re-fire."""
+        row = self._conn.execute(
+            "SELECT MAX(posted_at) AS t FROM images WHERE posted_at IS NOT NULL"
+        ).fetchone()
+        return datetime.strptime(row["t"], _ISO) if row["t"] else None
+
+    def real_posted_on_day(self, day: str) -> bool:
+        """Whether a real painting (not a fallback poster) has been posted to
+        the frame for this day — a poster must never replace one."""
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS n FROM images WHERE posted_at IS NOT NULL"
+            " AND COALESCE(source_day, substr(generated_at, 1, 10)) = ?"
+            " AND style NOT LIKE '%(fallback)%'",
+            (day,),
+        ).fetchone()
+        return row["n"] > 0
 
     def recent_images(self, limit: int = 50) -> list[ImageRecord]:
         rows = self._conn.execute(

@@ -184,3 +184,37 @@ def test_reimagined_day_keeps_source_date_but_records_creation_time(tmp_path, mo
         created_at=datetime(2026, 7, 13, 14), force_new=True)
     assert rec.source_day == "2026-07-05"
     assert rec.generated_at == datetime(2026, 7, 13, 14)
+
+
+def test_trigger_recorded_on_image(tmp_path, mocker):
+    client = mocker.Mock()
+    client.generate.return_value = _png()
+    store, artist = _artist(tmp_path, client)
+    store.add_detection(Detection(datetime(2026, 7, 5, 6), "Erithacus rubecula", "European Robin", 0.9))
+    rec = artist.generate(datetime(2026, 7, 5, 21), trigger="scheduled")
+    assert rec.trigger == "scheduled"
+
+
+def test_scheduled_budget_scales_with_slot_count(tmp_path, mocker):
+    """Three scheduled slots => three paid renders, even with the old cap of 1.
+
+    Manual renders never eat the budget (they are recorded as trigger=manual)."""
+    client = mocker.Mock()
+    client.generate.return_value = _png()
+    store, artist = _artist(tmp_path, client, max_paid_images_per_day=1)
+    artist.scheduled_slot_count = 3
+    store.add_detection(Detection(datetime(2026, 7, 5, 6), "Erithacus rubecula", "European Robin", 0.9))
+    # A manual paint first — must not consume the scheduled budget.
+    manual = artist.generate(datetime(2026, 7, 5, 7), force_paid=True, force_new=True)
+    assert manual.trigger == "manual" and "(fallback)" not in manual.style
+    store.add_detection(Detection(datetime(2026, 7, 5, 8), "Turdus merula", "Common Blackbird", 0.9))
+    a = artist.generate(datetime(2026, 7, 5, 12), trigger="scheduled", force_new=True)
+    store.add_detection(Detection(datetime(2026, 7, 5, 13), "Prunella modularis", "Dunnock", 0.9))
+    b = artist.generate(datetime(2026, 7, 5, 18), trigger="scheduled", force_new=True)
+    store.add_detection(Detection(datetime(2026, 7, 5, 19), "Troglodytes troglodytes", "Eurasian Wren", 0.9))
+    c = artist.generate(datetime(2026, 7, 5, 21), trigger="scheduled", force_new=True)
+    for rec in (a, b, c):
+        assert "(fallback)" not in rec.style    # all three slots got real paintings
+    store.add_detection(Detection(datetime(2026, 7, 5, 22), "Parus major", "Great Tit", 0.9))
+    d = artist.generate(datetime(2026, 7, 5, 22, 30), trigger="scheduled", force_new=True)
+    assert "(fallback)" in d.style              # 4th scheduled render is over budget

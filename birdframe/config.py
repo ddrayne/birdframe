@@ -18,7 +18,8 @@ DEFAULTS = {
     "chunk_seconds": 15.0,
     "chunk_overlap_seconds": 1.5,
     "post_mode": "daily",          # daily | live | manual
-    "post_time": "21:00",
+    "post_time": "21:00",          # legacy single slot; used when post_times is empty
+    "post_times": "",              # schedule: "HH:MM label, HH:MM, …" e.g. "06:30 dawn, 21:00 evening"
     "live_min_gap_minutes": 120,
     "live_window_start": "08:00",
     "live_window_end": "22:00",
@@ -54,6 +55,7 @@ class Config:
     chunk_overlap_seconds: float
     post_mode: str
     post_time: str
+    post_times: str
     live_min_gap_minutes: int
     live_window_start: str
     live_window_end: str

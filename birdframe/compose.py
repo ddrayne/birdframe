@@ -30,13 +30,14 @@ def _fit_contain(img: Image.Image, w: int, h: int) -> Image.Image:
     return img
 
 
-def compose_final(art_bytes: bytes, date: datetime, species: list[str]) -> bytes:
+def compose_final(art_bytes: bytes, date: datetime, species: list[str],
+                  label: str = "") -> bytes:
     art = _fit_contain(Image.open(io.BytesIO(art_bytes)), FRAME_W, ART_H)
     canvas = Image.new("RGB", (FRAME_W, FRAME_H), (250, 248, 242))
     # Centre the whole picture in the art area (letterboxed, never cropped).
     canvas.paste(art, ((FRAME_W - art.width) // 2, (ART_H - art.height) // 2))
     draw = ImageDraw.Draw(canvas)
-    date_str = _date_str(date)
+    date_str = _caption_date(date, label)
     draw.text((30, ART_H + 18), date_str, fill=(30, 30, 30), font=_font(34))
     names = ", ".join(species) if species else "a quiet day — no birds detected"
     names = _truncate(names, 90)
@@ -46,11 +47,11 @@ def compose_final(art_bytes: bytes, date: datetime, species: list[str]) -> bytes
     return out.getvalue()
 
 
-def fallback_poster(date: datetime, species: list[str]) -> bytes:
+def fallback_poster(date: datetime, species: list[str], label: str = "") -> bytes:
     canvas = Image.new("RGB", (FRAME_W, FRAME_H), (247, 244, 236))
     draw = ImageDraw.Draw(canvas)
     draw.text((60, 80), "Birds heard today", fill=(30, 30, 30), font=_font(64))
-    draw.text((60, 170), _date_str(date), fill=(90, 90, 90), font=_font(36))
+    draw.text((60, 170), _caption_date(date, label), fill=(90, 90, 90), font=_font(36))
     y = 300
     if not species:
         draw.text((60, y), "A quiet day — none detected.", fill=(60, 60, 60), font=_font(40))
@@ -65,6 +66,12 @@ def fallback_poster(date: datetime, species: list[str]) -> bytes:
 def _date_str(date: datetime) -> str:
     # %-d is platform-specific; build the day number without a leading zero by hand.
     return date.strftime(f"%A {date.day} %B %Y")
+
+
+def _caption_date(date: datetime, label: str = "") -> str:
+    """The caption's first line: the date, plus the slot label when one exists —
+    'Thursday 17 July 2026 · dawn'."""
+    return f"{_date_str(date)} · {label}" if label else _date_str(date)
 
 
 def _truncate(text: str, limit: int) -> str:

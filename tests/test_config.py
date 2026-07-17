@@ -52,3 +52,13 @@ def test_image_provider_from_toml(tmp_path):
     p = tmp_path / "config.toml"
     p.write_text('image_provider = "gemini"\n')
     assert Config.load(p).image_provider == "gemini"
+
+
+def test_post_times_defaults_empty_and_roundtrips(tmp_path):
+    from birdframe.config import Config
+    p = tmp_path / "config.toml"
+    cfg = Config.load(p)
+    assert cfg.post_times == ""             # legacy configs keep single post_time
+    cfg.post_times = "06:30 dawn, 21:00"
+    cfg.save()
+    assert Config.load(p).post_times == "06:30 dawn, 21:00"

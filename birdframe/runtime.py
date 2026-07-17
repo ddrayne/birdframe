@@ -27,7 +27,9 @@ class Runtime:
         self.on_first_ever = on_first_ever    # callback(common_name) for notifications
         self.notify = notify or (lambda title, msg: None)
         self.new_species_today = False
-        self.last_post: datetime | None = None
+        # Rehydrate from the store so a mid-day restart doesn't re-fire a
+        # schedule slot that already posted.
+        self.last_post: datetime | None = store.last_posted_at() if store else None
         self.last_detection_at: datetime | None = None
         self._pending_post_id: int | None = None
         self.status = "starting"
@@ -117,10 +119,12 @@ class Runtime:
             self.new_species_today = False
 
     def scheduler_state(self, now: datetime):
-        from birdframe.scheduler import SchedulerState
+        from birdframe.scheduler import SchedulerState, parse_slots
         c = self.config
         return SchedulerState(
-            mode=c.post_mode, post_time=c.post_time, last_post=self.last_post,
+            mode=c.post_mode,
+            slots=parse_slots(getattr(c, "post_times", ""), c.post_time),
+            last_post=self.last_post,
             live_min_gap_minutes=c.live_min_gap_minutes,
             live_window_start=c.live_window_start, live_window_end=c.live_window_end,
             new_species_today=self.new_species_today,
@@ -130,10 +134,51 @@ class Runtime:
         from birdframe.scheduler import decide
         now = now or self.now()
         self.ensure_backup(now)
-        if decide(self.scheduler_state(now), now):
-            self.post_now(now)
+        decision = decide(self.scheduler_state(now), now)
+        if decision:
+            trigger, slot = decision
+            self.scheduled_post(now, trigger, slot)
         else:
             self.retry_pending_post(now)      # keep trying a frame that was down
+
+    def scheduled_post(self, when: datetime, trigger: str,
+                       slot: tuple[str, str] | None) -> str:
+        """An automatic post (schedule slot or live edition), with the guards a
+        manual 'Post now' deliberately skips: never repost an unchanged picture,
+        and never replace a real painting with a fallback poster."""
+        # Handled up front: a skipped or failed slot must not re-fire every tick.
+        self.last_post = when
+        label = slot[1] if slot else ""
+        rec = self.artist.generate(
+            when, trigger="scheduled" if trigger == "daily" else "live",
+            slot_label=label)
+        if rec is None:
+            return "nothing to post"          # no reliable birds yet
+        edition = label or (slot[0] if slot else "live")
+        if rec.posted_at is not None:
+            # The artist reused the picture already on the frame — same birds.
+            self.notify("Nothing new to post",
+                        f"The {edition} edition was skipped — same birds as the "
+                        "picture already on the frame.")
+            return "unchanged"
+        if "(fallback)" in rec.style and self.store.real_posted_on_day(
+                when.strftime("%Y-%m-%d")):
+            # Budget spent or the painter failed; a poster never covers a painting.
+            self.notify("Kept today's painting on the frame",
+                        f"The {edition} edition would have been a text poster, "
+                        "so it was skipped.")
+            return "kept painting"
+        with open(rec.path, "rb") as fh:
+            result = self.publisher.publish(fh.read())
+        if result.status == "posted":
+            self.store.mark_posted(rec.id, when)
+            self._pending_post_id = None
+        elif result.status == "unreachable":
+            self._pending_post_id = rec.id    # retry on later ticks until it lands
+            self.notify("Couldn't reach the frame",
+                        "The picture is saved and will post itself when the frame returns.")
+        self.new_species_today = False
+        return result.status
 
     def ensure_backup(self, now: datetime | None = None):
         """Create at most one consistent database snapshot per calendar day."""
