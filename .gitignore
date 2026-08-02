@@ -6,3 +6,11 @@ __pycache__/
 .DS_Store
 uv.lock
 .worktrees/
+
+# Local agent packages and generated promotional media are kept outside the
+# application history. They remain on disk and can be regenerated independently.
+.agents/
+.claude/
+skills-lock.json
+site/
+videos/
