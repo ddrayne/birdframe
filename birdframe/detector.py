@@ -5,7 +5,7 @@ Uses predict_arrays so audio never touches disk.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import numpy as np
 
@@ -23,10 +23,14 @@ def week_of_year(when: datetime) -> int:
     return min(48, (when.month - 1) * 4 + min(3, (when.day - 1) // 7) + 1)
 
 
-def filter_detections(raw, whitelist, threshold, when, blocklist=None) -> list[Detection]:
+def filter_detections(raw, whitelist, threshold, when, blocklist=None,
+                      chunk_duration_s: float | None = None) -> list[Detection]:
     blocklist = blocklist or set()
     out: list[Detection] = []
-    for name, confidence in raw:
+    for item in raw:
+        name, confidence = item[:2]
+        start_s = float(item[2]) if len(item) > 2 and item[2] is not None else None
+        end_s = float(item[3]) if len(item) > 3 and item[3] is not None else None
         if confidence < threshold:
             continue
         if whitelist and name not in whitelist:
@@ -34,7 +38,11 @@ def filter_detections(raw, whitelist, threshold, when, blocklist=None) -> list[D
         sci, common = parse_species_name(name)
         if common in blocklist:      # species the user vetoed as "not here"
             continue
-        out.append(Detection(when, sci, common, float(confidence)))
+        timestamp = when
+        if chunk_duration_s is not None and end_s is not None:
+            timestamp -= timedelta(seconds=max(0.0, chunk_duration_s - end_s))
+        out.append(Detection(timestamp, sci, common, float(confidence),
+                             segment_start_s=start_s, segment_end_s=end_s))
     return out
 
 
@@ -64,6 +72,25 @@ def _rows_to_pairs(result) -> list[tuple[str, float]]:
     for row in arr:
         pairs.append((str(_row_field(row, name_field)), float(_row_field(row, conf_field))))
     return pairs
+
+
+def _rows_to_records(result) -> list[tuple[str, float, float | None, float | None]]:
+    """Preserve BirdNET's event offsets for segment-level acoustic metrics."""
+    arr = result.to_structured_array()
+    names = getattr(getattr(arr, "dtype", None), "names", None) or ()
+    name_field = next((n for n in names if "species" in n.lower() or "name" in n.lower()),
+                      names[0] if names else "species_name")
+    conf_field = next((n for n in names if any(k in n.lower()
+                                               for k in ("conf", "score", "prob"))),
+                      names[-1] if names else "confidence")
+    start_field = next((n for n in names if "start" in n.lower() and "time" in n.lower()), None)
+    end_field = next((n for n in names if "end" in n.lower() and "time" in n.lower()), None)
+    return [
+        (str(_row_field(row, name_field)), float(_row_field(row, conf_field)),
+         float(_row_field(row, start_field)) if start_field else None,
+         float(_row_field(row, end_field)) if end_field else None)
+        for row in arr
+    ]
 
 
 class Detector:
@@ -114,12 +141,13 @@ class Detector:
         self._close_session()
         self._open_session()
 
-    def _extract(self, result) -> list[tuple[str, float]]:
-        return _rows_to_pairs(result)
+    def _extract(self, result) -> list[tuple[str, float, float | None, float | None]]:
+        return _rows_to_records(result)
 
     def predict_chunk(self, audio: np.ndarray, sample_rate: int,
                       when: datetime) -> list[Detection]:
         result = self._session.run_arrays([(audio.astype(np.float32), sample_rate)])
         raw = self._extract(result)
         return filter_detections(raw, self.whitelist, self.threshold, when,
-                                 blocklist=self.blocklist)
+                                 blocklist=self.blocklist,
+                                 chunk_duration_s=len(audio) / sample_rate)

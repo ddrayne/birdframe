@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
@@ -75,14 +76,19 @@ class Runtime:
         return now.hour == hour and up_hours >= 3
 
     def on_chunk(self, audio, when: datetime) -> None:
+        from birdframe.acoustics import measure_detection
         self.roll_day(when)
         dets = self.detector.predict_chunk(audio, self.detector.sample_rate, when)
         with self._lock:
-            for det in dets:
+            for raw_det in dets:
+                metrics = measure_detection(
+                    audio, self.detector.sample_rate,
+                    raw_det.segment_start_s, raw_det.segment_end_s)
+                det = replace(raw_det, **vars(metrics)) if metrics else raw_det
                 first_ever = self.store.first_ever(det.common_name)
                 self.store.add_detection(det)
-                self.last_detection_at = when
-                self._save_clip(audio, det, when)
+                self.last_detection_at = det.timestamp
+                self._save_clip(audio, det, det.timestamp)
                 if det.common_name not in self._seen_today:
                     self._seen_today.add(det.common_name)
                     self.new_species_today = True

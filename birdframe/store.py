@@ -4,8 +4,10 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime
+from functools import wraps
 from pathlib import Path
 
 
@@ -15,6 +17,13 @@ class Detection:
     scientific_name: str
     common_name: str
     confidence: float
+    id: int | None = None
+    segment_start_s: float | None = None
+    segment_end_s: float | None = None
+    rms_dbfs: float | None = None
+    peak_dbfs: float | None = None
+    noise_floor_dbfs: float | None = None
+    snr_db: float | None = None
 
 
 @dataclass
@@ -56,11 +65,35 @@ def _pack_time_species(counts: dict[str, int], limit: int = 8) -> dict:
     }
 
 
+def _serialize_public_methods(cls):
+    """Keep one shared sqlite3 connection safe across app worker threads.
+
+    A store call may execute and consume several cursors.  Locking only writes
+    still lets dashboard requests interleave those cursor operations on the
+    same connection, which can produce transiently corrupt ``sqlite3.Row``
+    values.  The re-entrant lock also permits store methods to call one another;
+    ``Condition.wait`` releases it fully while a realtime query is waiting.
+    """
+    def synchronized(method):
+        @wraps(method)
+        def wrapper(self, *args, **kwargs):
+            with self._lock:
+                return method(self, *args, **kwargs)
+        return wrapper
+
+    for name, method in tuple(vars(cls).items()):
+        if not name.startswith("_") and callable(method):
+            setattr(cls, name, synchronized(method))
+    return cls
+
+
+@_serialize_public_methods
 class Store:
     def __init__(self, path: Path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
+        self._new_detection = threading.Condition(self._lock)
         self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
@@ -77,6 +110,11 @@ class Store:
                     common_name TEXT NOT NULL,
                     confidence REAL NOT NULL)"""
             )
+            detection_columns = {r["name"] for r in self._conn.execute(
+                "PRAGMA table_info(detections)").fetchall()}
+            for name in ("rms_dbfs", "peak_dbfs", "noise_floor_dbfs", "snr_db"):
+                if name not in detection_columns:
+                    self._conn.execute(f"ALTER TABLE detections ADD COLUMN {name} REAL")
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_det_day ON detections(day)")
             # Read-only dashboard exploration grows much faster than the original
             # day view. These indexes do not alter a detection; they keep species
@@ -140,14 +178,19 @@ class Store:
         finally:
             destination.close()
 
-    def add_detection(self, det: Detection) -> None:
-        with self._lock, self._conn:
-            self._conn.execute(
-                "INSERT INTO detections (ts, day, scientific_name, common_name, confidence)"
-                " VALUES (?, ?, ?, ?, ?)",
+    def add_detection(self, det: Detection) -> int:
+        with self._new_detection, self._conn:
+            cur = self._conn.execute(
+                "INSERT INTO detections (ts, day, scientific_name, common_name, confidence,"
+                " rms_dbfs, peak_dbfs, noise_floor_dbfs, snr_db)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (det.timestamp.strftime(_ISO), det.timestamp.strftime("%Y-%m-%d"),
-                 det.scientific_name, det.common_name, det.confidence),
+                 det.scientific_name, det.common_name, det.confidence,
+                 det.rms_dbfs, det.peak_dbfs, det.noise_floor_dbfs, det.snr_db),
             )
+            detection_id = int(cur.lastrowid)
+            self._new_detection.notify_all()
+            return detection_id
 
     @staticmethod
     def _aggregate(rows, min_confidence: float = 0.0) -> list[SpeciesDay]:
@@ -218,15 +261,105 @@ class Store:
     def recent_detections(self, limit: int = 50, min_confidence: float = 0.0) -> list[Detection]:
         """The most recent individual detections, newest first — the live feed."""
         rows = self._conn.execute(
-            "SELECT ts, scientific_name, common_name, confidence FROM detections"
+            "SELECT id, ts, scientific_name, common_name, confidence,"
+            " rms_dbfs, peak_dbfs, noise_floor_dbfs, snr_db FROM detections"
             " WHERE confidence >= ? ORDER BY ts DESC, id DESC LIMIT ?",
             (min_confidence, limit),
         ).fetchall()
         return [
             Detection(datetime.strptime(r["ts"], _ISO), r["scientific_name"],
-                      r["common_name"], r["confidence"])
+                      r["common_name"], r["confidence"], id=r["id"],
+                      rms_dbfs=r["rms_dbfs"], peak_dbfs=r["peak_dbfs"],
+                      noise_floor_dbfs=r["noise_floor_dbfs"], snr_db=r["snr_db"])
             for r in rows
         ]
+
+    def query_detections(self, *, after_id: int | None = None,
+                         before_id: int | None = None,
+                         start_day: str | None = None,
+                         end_day: str | None = None,
+                         common_name: str | None = None,
+                         min_confidence: float = 0.0,
+                         limit: int = 100,
+                         wait_seconds: float = 0.0) -> list[dict]:
+        """Cursor-friendly raw observations; optionally wait for a new row."""
+        limit = max(1, min(int(limit), 250))
+        wait_seconds = max(0.0, min(float(wait_seconds), 30.0))
+        deadline = time.monotonic() + wait_seconds
+
+        def fetch() -> list[dict]:
+            clauses = ["confidence >= ?"]
+            params: list[object] = [float(min_confidence)]
+            for sql, value in (
+                ("id > ?", after_id), ("id < ?", before_id),
+                ("day >= ?", start_day), ("day <= ?", end_day),
+                ("common_name = ?", common_name),
+            ):
+                if value is not None:
+                    clauses.append(sql)
+                    params.append(value)
+            params.append(limit)
+            direction = "ASC" if after_id is not None else "DESC"
+            rows = self._conn.execute(
+                "SELECT id, ts, day, common_name, scientific_name, confidence,"
+                " rms_dbfs, peak_dbfs, noise_floor_dbfs, snr_db FROM detections WHERE "
+                + " AND ".join(clauses) + f" ORDER BY id {direction} LIMIT ?", params,
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+        with self._new_detection:
+            while True:
+                rows = fetch()
+                if rows or after_id is None or wait_seconds <= 0:
+                    return rows
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return []
+                self._new_detection.wait(remaining)
+
+    def rank_species(self, metric: str = "detections", *,
+                     start_day: str | None = None,
+                     end_day: str | None = None,
+                     min_confidence: float = 0.0,
+                     limit: int = 100) -> list[dict]:
+        """General ranking primitive for agent questions and the REST API."""
+        ordering = {
+            "detections": ("detections", "DESC", None),
+            "days": ("days", "DESC", None),
+            "first_heard": ("first_heard", "ASC", None),
+            "earliest_time": ("earliest_time", "ASC", None),
+            "latest_time": ("latest_time", "DESC", None),
+            "confidence": ("best_confidence", "DESC", None),
+            "rms_dbfs": ("loudest_rms_dbfs", "DESC", "MAX(rms_dbfs) IS NOT NULL"),
+            "peak_dbfs": ("loudest_peak_dbfs", "DESC", "MAX(peak_dbfs) IS NOT NULL"),
+            "snr_db": ("best_snr_db", "DESC", "MAX(snr_db) IS NOT NULL"),
+        }
+        if metric not in ordering:
+            raise ValueError(f"unknown ranking metric: {metric}")
+        clauses = ["confidence >= ?"]
+        params: list[object] = [float(min_confidence)]
+        if start_day:
+            clauses.append("day >= ?")
+            params.append(start_day)
+        if end_day:
+            clauses.append("day <= ?")
+            params.append(end_day)
+        alias, direction, having = ordering[metric]
+        sql = (
+            "SELECT common_name, MIN(scientific_name) AS scientific_name,"
+            " COUNT(*) AS detections, COUNT(DISTINCT day) AS days,"
+            " MIN(ts) AS first_heard, MAX(ts) AS last_heard,"
+            " MIN(substr(ts,12,8)) AS earliest_time,"
+            " MAX(substr(ts,12,8)) AS latest_time,"
+            " MAX(confidence) AS best_confidence, AVG(confidence) AS avg_confidence,"
+            " MAX(rms_dbfs) AS loudest_rms_dbfs,"
+            " MAX(peak_dbfs) AS loudest_peak_dbfs, MAX(snr_db) AS best_snr_db"
+            " FROM detections WHERE " + " AND ".join(clauses) +
+            " GROUP BY common_name" + (f" HAVING {having}" if having else "") +
+            f" ORDER BY {alias} {direction}, common_name LIMIT ?"
+        )
+        params.append(max(1, min(int(limit), 500)))
+        return [dict(r) for r in self._conn.execute(sql, params).fetchall()]
 
     def activity_buckets(self, start: datetime, end: datetime, n: int = 24,
                          min_confidence: float = 0.0) -> list[int]:
@@ -709,7 +842,9 @@ class Store:
     def all_detections(self):
         """Every detection, oldest first — for CSV export."""
         return self._conn.execute(
-            "SELECT ts, common_name, scientific_name, confidence FROM detections ORDER BY ts"
+            "SELECT id, ts, common_name, scientific_name, confidence,"
+            " rms_dbfs, peak_dbfs, noise_floor_dbfs, snr_db"
+            " FROM detections ORDER BY ts"
         ).fetchall()
 
     def last_detection_time(self) -> datetime | None:

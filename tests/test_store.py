@@ -1,3 +1,6 @@
+import sqlite3
+import threading
+import time
 from datetime import datetime
 
 from birdframe.store import Store, Detection
@@ -68,6 +71,94 @@ def test_recent_detections_newest_first(tmp_path):
     recent = s.recent_detections(limit=2)
     assert [d.common_name for d in recent] == ["Common Blackbird", "Eurasian Wren"]
     assert recent[0].confidence == 0.8
+    assert recent[0].id is not None
+
+
+def test_acoustic_metrics_migrate_and_roundtrip(tmp_path):
+    path = tmp_path / "legacy.sqlite"
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "CREATE TABLE detections (id INTEGER PRIMARY KEY, ts TEXT NOT NULL,"
+        " day TEXT NOT NULL, scientific_name TEXT NOT NULL,"
+        " common_name TEXT NOT NULL, confidence REAL NOT NULL)"
+    )
+    conn.commit()
+    conn.close()
+
+    store = Store(path)
+    detection_id = store.add_detection(Detection(
+        _dt(6), "Erithacus rubecula", "European Robin", 0.9,
+        rms_dbfs=-24.2, peak_dbfs=-10.5, noise_floor_dbfs=-48.0, snr_db=23.8,
+    ))
+    row = store.query_detections(after_id=0)[0]
+    assert row["id"] == detection_id
+    assert row["rms_dbfs"] == -24.2 and row["snr_db"] == 23.8
+
+
+def test_realtime_cursor_waits_for_next_detection(tmp_path):
+    store = Store(tmp_path / "db.sqlite")
+    result = []
+
+    def wait():
+        result.extend(store.query_detections(after_id=0, wait_seconds=1))
+
+    thread = threading.Thread(target=wait)
+    thread.start()
+    time.sleep(0.03)
+    detection_id = store.add_detection(
+        Detection(_dt(6), "Erithacus rubecula", "European Robin", 0.9))
+    thread.join(timeout=2)
+    assert not thread.is_alive()
+    assert result[0]["id"] == detection_id
+
+
+def test_public_store_calls_serialize_shared_connection_access(tmp_path, monkeypatch):
+    store = Store(tmp_path / "db.sqlite")
+    store.add_detection(Detection(
+        _dt(6), "Erithacus rubecula", "European Robin", 0.9))
+    aggregate_started = threading.Event()
+    release_aggregate = threading.Event()
+    second_call_completed = threading.Event()
+    original_aggregate = Store._aggregate
+
+    def slow_aggregate(rows, min_confidence=0.0):
+        aggregate_started.set()
+        release_aggregate.wait(timeout=1)
+        return original_aggregate(rows, min_confidence)
+
+    monkeypatch.setattr(Store, "_aggregate", staticmethod(slow_aggregate))
+    first = threading.Thread(target=lambda: store.species_for_day(_dt(12)))
+    second = threading.Thread(
+        target=lambda: (store.totals(), second_call_completed.set()))
+    first.start()
+    assert aggregate_started.wait(timeout=1)
+    second.start()
+    try:
+        assert not second_call_completed.wait(timeout=0.05)
+    finally:
+        release_aggregate.set()
+        first.join(timeout=1)
+        second.join(timeout=1)
+    assert second_call_completed.is_set()
+
+
+def test_rank_species_supports_counts_chronology_and_sound(tmp_path):
+    store = Store(tmp_path / "db.sqlite")
+    store.add_detection(Detection(
+        _dt(5), "Erithacus rubecula", "European Robin", 0.9,
+        rms_dbfs=-30, peak_dbfs=-12, noise_floor_dbfs=-50, snr_db=20))
+    store.add_detection(Detection(
+        _dt(6), "Erithacus rubecula", "European Robin", 0.8,
+        rms_dbfs=-28, peak_dbfs=-10, noise_floor_dbfs=-50, snr_db=22))
+    store.add_detection(Detection(
+        _dt(4), "Turdus merula", "Eurasian Blackbird", 0.95,
+        rms_dbfs=-18, peak_dbfs=-4, noise_floor_dbfs=-45, snr_db=27))
+
+    assert store.rank_species("detections")[0]["common_name"] == "European Robin"
+    assert store.rank_species("earliest_time")[0]["common_name"] == "Eurasian Blackbird"
+    loudest = store.rank_species("rms_dbfs")[0]
+    assert loudest["common_name"] == "Eurasian Blackbird"
+    assert loudest["loudest_rms_dbfs"] == -18
 
 
 def test_species_in_window(tmp_path):

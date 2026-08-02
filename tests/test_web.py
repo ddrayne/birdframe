@@ -142,6 +142,31 @@ def test_now_endpoint_reports_latest_and_feed(tmp_path):
     assert sum(data["activity"]) >= 1
 
 
+def test_detection_cursor_and_acoustic_rankings(tmp_path):
+    store, ctx, client = _client(tmp_path)
+    detection_id = store.add_detection(Detection(
+        datetime(2026, 7, 5, 11, 30), "Turdus merula", "Eurasian Blackbird", 0.91,
+        rms_dbfs=-18.0, peak_dbfs=-5.0, noise_floor_dbfs=-44.0, snr_db=26.0))
+
+    feed = client.get("/api/detections", params={"after_id": 1}).json()
+    assert feed["next_cursor"] == detection_id
+    assert feed["detections"][0]["rms_dbfs"] == -18.0
+    assert "not individual birds" in feed["count_semantics"]
+
+    common = client.get("/api/rankings", params={"metric": "detections"}).json()
+    assert common["rankings"][0]["common_name"] in {"European Robin", "Eurasian Blackbird"}
+    loud = client.get("/api/rankings", params={"metric": "rms_dbfs"}).json()
+    assert loud["rankings"][0]["common_name"] == "Eurasian Blackbird"
+    assert loud["rankings"][0]["loudest_rms_dbfs"] == -18.0
+
+
+def test_detection_and_ranking_validation(tmp_path):
+    _, _, client = _client(tmp_path)
+    assert client.get("/api/detections?wait=1").status_code == 400
+    assert client.get("/api/detections?after_id=1&before_id=2").status_code == 400
+    assert client.get("/api/rankings?metric=population").status_code == 400
+
+
 def test_now_endpoint_empty_is_graceful(tmp_path):
     store = Store(tmp_path / "empty.sqlite")
     from birdframe.config import Config

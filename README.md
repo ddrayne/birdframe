@@ -122,6 +122,46 @@ uv run birdframe make-app     # (re)create ~/Applications/Birdframe.app
 Logs: `~/Library/Logs/birdframe.log`. Data (SQLite, images, clips):
 `~/.local/share/birdframe/`. Settings: `~/.config/birdframe/config.toml`.
 
+## Agent and MCP access
+
+The dashboard includes a read-only analytical API for agents as well as its UI.
+FastAPI documents the complete schema at `http://localhost:8355/docs` and
+`http://localhost:8355/openapi.json`. Useful endpoints include:
+
+- `GET /api/detections` — raw observations with date/species/confidence filters
+- `GET /api/detections?after_id=123&wait=30` — bounded realtime long polling
+- `GET /api/rankings?metric=detections` — most frequently detected species
+- `GET /api/rankings?metric=earliest_time` — earliest singers
+- `GET /api/rankings?metric=rms_dbfs` — loudest detected segments
+- `GET /api/rankings?metric=snr_db` — calls most prominent above ambient sound
+- `/api/now`, `/api/today`, `/api/census`, `/api/day/{day}`, and
+  `/api/species/{common_name}` — live, historical, and species-level context
+
+`birdframe-mcp` wraps those endpoints as a local, read-only MCP server over
+stdio. Configure an MCP client to run it from this checkout, for example:
+
+```json
+{
+  "mcpServers": {
+    "birdframe": {
+      "command": "/path/to/birdframe/.venv/bin/birdframe-mcp"
+    }
+  }
+}
+```
+
+Alternatively run it manually with `uv run birdframe-mcp`. Set
+`BIRDFRAME_API_URL` only if the dashboard is not at
+`http://localhost:8355`. Exposed tools cover the current soundscape, realtime
+waiting, raw queries, rankings, period comparisons, day/species dossiers,
+census data, and the retained best clips. Posting, generation, settings, and
+blocklisting are intentionally not exposed through MCP.
+
+Counts mean BirdNET detection events or calls, not individual birds. New
+detections store only RMS, peak, estimated noise floor, and SNR numbers; raw
+audio handling is unchanged and birdframe still keeps at most one best clip per
+species per day. Historical rows naturally show `null` for acoustic metrics.
+
 birdframe creates a transactionally consistent SQLite snapshot every day under
 `~/.local/share/birdframe/backups/` and keeps 30 days by default. This uses
 SQLite's online backup API, so committed WAL data is included safely while the

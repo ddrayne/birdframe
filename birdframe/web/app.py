@@ -76,6 +76,24 @@ def _assess_species(ctx, s, day=None):
     }
 
 
+def _metric(value):
+    return None if value is None else round(float(value), 3)
+
+
+def _detection_payload(d):
+    return {
+        "id": d.id,
+        "timestamp": d.timestamp.strftime("%Y-%m-%dT%H:%M:%S"),
+        "common_name": d.common_name,
+        "scientific_name": d.scientific_name,
+        "confidence": round(d.confidence, 3),
+        "rms_dbfs": _metric(d.rms_dbfs),
+        "peak_dbfs": _metric(d.peak_dbfs),
+        "noise_floor_dbfs": _metric(d.noise_floor_dbfs),
+        "snr_db": _metric(d.snr_db),
+    }
+
+
 def create_app(ctx: AppContext) -> FastAPI:
     import threading as _threading
     app = FastAPI(title="birdframe")
@@ -298,11 +316,17 @@ def create_app(ctx: AppContext) -> FastAPI:
             latest_tier = match["tier"]
         return {
             "now": now.strftime("%H:%M:%S"),
+            "cursor": latest.id if latest else 0,
             "window_minutes": window_min,
             "latest": None if latest is None else {
+                "id": latest.id,
                 "common_name": latest.common_name,
                 "scientific_name": latest.scientific_name,
                 "confidence": round(latest.confidence, 2),
+                "rms_dbfs": _metric(latest.rms_dbfs),
+                "peak_dbfs": _metric(latest.peak_dbfs),
+                "noise_floor_dbfs": _metric(latest.noise_floor_dbfs),
+                "snr_db": _metric(latest.snr_db),
                 "at": latest.timestamp.strftime("%H:%M:%S"),
                 "seconds_ago": max(0, int((now - latest.timestamp).total_seconds())),
                 "tier": latest_tier,
@@ -310,8 +334,7 @@ def create_app(ctx: AppContext) -> FastAPI:
                              if ctx.store.clip_path(day, latest.common_name) else None),
             },
             "feed": [
-                {"common_name": d.common_name, "scientific_name": d.scientific_name,
-                 "confidence": round(d.confidence, 2), "at": d.timestamp.strftime("%H:%M:%S")}
+                {**_detection_payload(d), "at": d.timestamp.strftime("%H:%M:%S")}
                 for d in recent
             ],
             "window_species": window_assessed,
@@ -319,6 +342,52 @@ def create_app(ctx: AppContext) -> FastAPI:
                 now - timedelta(minutes=window_min), now, n=24, min_confidence=floor),
             "today_species_count": len(today),
             "new_today": sorted(first_ever),
+        }
+
+    def _validated_day(value: str | None, field: str):
+        if value is None:
+            return None
+        try:
+            return datetime.strptime(value, "%Y-%m-%d").strftime("%Y-%m-%d")
+        except ValueError:
+            raise ValueError(f"{field} must be YYYY-MM-DD") from None
+
+    @app.get("/api/detections")
+    def detections(after_id: int | None = Query(None, ge=0),
+                   before_id: int | None = Query(None, ge=1),
+                   start_day: str | None = None,
+                   end_day: str | None = None,
+                   species: str | None = None,
+                   min_confidence: float = Query(0.0, ge=0.0, le=1.0),
+                   limit: int = Query(100, ge=1, le=250),
+                   wait: float = Query(0.0, ge=0.0, le=30.0)):
+        """Raw, cursor-addressable detections. Supplying ``after_id`` and
+        ``wait`` turns this into a bounded long poll for realtime agents.
+        """
+        if after_id is not None and before_id is not None:
+            return JSONResponse({"error": "use after_id or before_id, not both"},
+                                status_code=400)
+        if wait and after_id is None:
+            return JSONResponse({"error": "wait requires after_id"}, status_code=400)
+        try:
+            start_day = _validated_day(start_day, "start_day")
+            end_day = _validated_day(end_day, "end_day")
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        if start_day and end_day and start_day > end_day:
+            return JSONResponse({"error": "start_day must not be after end_day"},
+                                status_code=400)
+        rows = ctx.store.query_detections(
+            after_id=after_id, before_id=before_id,
+            start_day=start_day, end_day=end_day,
+            common_name=species.strip() if species else None,
+            min_confidence=min_confidence, limit=limit, wait_seconds=wait,
+        )
+        return {
+            "detections": rows,
+            "next_cursor": max((r["id"] for r in rows), default=after_id or 0),
+            "next_before": min((r["id"] for r in rows), default=before_id),
+            "count_semantics": "BirdNET detection events/calls, not individual birds",
         }
 
     @app.post("/api/capture")
@@ -669,6 +738,69 @@ def create_app(ctx: AppContext) -> FastAPI:
             "life_list": included,
         }
 
+    @app.get("/api/rankings")
+    def rankings(metric: str = "detections",
+                 days: int | None = Query(None, ge=1, le=3660),
+                 start_day: str | None = None,
+                 end_day: str | None = None,
+                 tiers: str = "confirmed,probable,tentative",
+                 min_confidence: float = Query(0.0, ge=0.0, le=1.0),
+                 limit: int = Query(20, ge=1, le=100)):
+        """Rank species by frequency, chronology, confidence, or acoustics."""
+        allowed = {"detections", "days", "first_heard", "earliest_time",
+                   "latest_time", "confidence", "rms_dbfs", "peak_dbfs", "snr_db"}
+        if metric not in allowed:
+            return JSONResponse({"error": "metric must be one of " + ", ".join(sorted(allowed))},
+                                status_code=400)
+        wanted = {t.strip() for t in tiers.split(",") if t.strip()}
+        if not wanted or not wanted <= set(_TIER_ORDER):
+            return JSONResponse({"error": "tiers must be confirmed, probable, or tentative"},
+                                status_code=400)
+        try:
+            start_day = _validated_day(start_day, "start_day")
+            end_day = _validated_day(end_day, "end_day")
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        if days is not None:
+            if start_day is not None:
+                return JSONResponse({"error": "use days or start_day, not both"}, status_code=400)
+            start_day = (ctx.now().date() - timedelta(days=days - 1)).isoformat()
+        if start_day and end_day and start_day > end_day:
+            return JSONResponse({"error": "start_day must not be after end_day"},
+                                status_code=400)
+
+        from birdframe.reliability import GEO_DEFAULT, assess
+        lifetime = {row["common_name"]: row for row in ctx.store.life_list()}
+        rows = []
+        for row in ctx.store.rank_species(
+                metric, start_day=start_day, end_day=end_day,
+                min_confidence=min_confidence, limit=500):
+            geo = (ctx.geo_lookup or {}).get(row["scientific_name"], GEO_DEFAULT)
+            history = lifetime.get(row["common_name"], {})
+            assessment = assess(history.get("best", row["best_confidence"]), geo,
+                                history.get("total", row["detections"]))
+            if assessment.tier not in wanted:
+                continue
+            item = dict(row)
+            for key in ("best_confidence", "avg_confidence", "loudest_rms_dbfs",
+                        "loudest_peak_dbfs", "best_snr_db"):
+                item[key] = _metric(item[key])
+            item.update(tier=assessment.tier, reliability=assessment.score,
+                        reasons=assessment.reasons, geo=round(geo, 3))
+            rows.append(item)
+            if len(rows) >= limit:
+                break
+        return {
+            "metric": metric, "start_day": start_day, "end_day": end_day,
+            "rankings": rows,
+            "count_semantics": "BirdNET detection events/calls, not individual birds",
+            "acoustic_semantics": {
+                "rms_dbfs": "average digital level of the detected segment",
+                "peak_dbfs": "peak digital level of the detected segment",
+                "snr_db": "segment RMS above the estimated ambient noise floor",
+            },
+        }
+
     @app.get("/api/species/{common_name}")
     def species_detail(common_name: str,
                        days: int | None = Query(None, ge=1, le=3660)):
@@ -747,9 +879,14 @@ def create_app(ctx: AppContext) -> FastAPI:
     @app.get("/api/export.csv")
     def export_csv():
         from fastapi.responses import Response
-        lines = ["timestamp,common_name,scientific_name,confidence"]
+        lines = ["id,timestamp,common_name,scientific_name,confidence,rms_dbfs,"
+                 "peak_dbfs,noise_floor_dbfs,snr_db"]
         for r in ctx.store.all_detections():
-            lines.append(f'{r["ts"]},"{r["common_name"]}","{r["scientific_name"]}",{r["confidence"]:.4f}')
+            values = ["" if r[k] is None else str(r[k])
+                      for k in ("rms_dbfs", "peak_dbfs", "noise_floor_dbfs", "snr_db")]
+            lines.append(f'{r["id"]},{r["ts"]},"{r["common_name"]}",'
+                         f'"{r["scientific_name"]}",{r["confidence"]:.4f},'
+                         + ",".join(values))
         return Response("\n".join(lines), media_type="text/csv",
                         headers={"Content-Disposition": "attachment; filename=birdframe-detections.csv"})
 

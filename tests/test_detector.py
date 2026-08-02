@@ -30,6 +30,17 @@ def test_filter_detections_applies_confidence_and_whitelist():
     assert dets[0].timestamp == when
 
 
+def test_filter_detections_preserves_segment_and_uses_event_time():
+    when = datetime(2026, 7, 5, 6)
+    det = filter_detections(
+        [("Erithacus rubecula_European Robin", 0.91, 3.0, 6.0)],
+        {"Erithacus rubecula_European Robin"}, threshold=0.55, when=when,
+        chunk_duration_s=15.0,
+    )[0]
+    assert det.segment_start_s == 3.0 and det.segment_end_s == 6.0
+    assert det.timestamp == datetime(2026, 7, 5, 5, 59, 51)
+
+
 def test_blocklist_vetoes_species():
     raw = [
         ("Erithacus rubecula_European Robin", 0.9),
@@ -47,12 +58,14 @@ def test_predict_chunk_uses_model(mocker):
     det.blocklist = set()
     det.whitelist = {"Erithacus rubecula_European Robin"}
     fake_result = mocker.Mock()
-    fake_result.to_structured_array.return_value = [
-        {"species_name": "Erithacus rubecula_European Robin", "confidence": 0.8},
-    ]
+    fake_result.to_structured_array.return_value = np.array([
+        (0.0, 1.0, "Erithacus rubecula_European Robin", 0.8),
+    ], dtype=[("start_time", "f4"), ("end_time", "f4"),
+              ("species_name", "O"), ("confidence", "f4")])
     det._session = mocker.Mock()
     det._session.run_arrays.return_value = fake_result
     det._extract = Detector._extract.__get__(det)
     out = det.predict_chunk(np.zeros(48000, dtype=np.float32), 48000, datetime(2026, 7, 5, 6))
     assert out[0].common_name == "European Robin"
+    assert out[0].segment_start_s == 0 and out[0].segment_end_s == 1
     det._session.run_arrays.assert_called_once()
