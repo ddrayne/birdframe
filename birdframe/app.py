@@ -173,13 +173,21 @@ def _notify(title: str, message: str) -> None:
 
 def _start_listener(runtime: Runtime, config: Config) -> None:
     from birdframe.listener import AudioListener
+    import time
+
+    last_notice = 0.0
 
     def on_status(s: str) -> None:
+        nonlocal last_notice
         was_ok = runtime.status == "listening"
         runtime.status = s
         log.info("listener: %s", s)
-        if s.startswith("audio error") and was_ok:
-            _notify("Microphone problem", "birdframe lost the audio input and is retrying.")
+        trouble = s.startswith(("audio error", "recovering", "detector error"))
+        now = time.monotonic()
+        if trouble and was_ok and now - last_notice >= 1800:
+            last_notice = now
+            _notify("Microphone recovery",
+                    "birdframe found an unhealthy audio stream and is reconnecting it.")
 
     listener = AudioListener(
         sample_rate=runtime.detector.sample_rate,
@@ -188,9 +196,42 @@ def _start_listener(runtime: Runtime, config: Config) -> None:
         device=config.input_device or None,
         on_chunk=runtime.on_chunk,
         on_status=on_status,
+        callback_timeout_seconds=config.audio_callback_timeout_seconds,
+        detector_timeout_seconds=config.audio_detector_timeout_seconds,
+        flat_chunks=config.audio_flat_chunks,
+        flat_dynamic_dbfs=config.audio_flat_dynamic_dbfs,
     )
     runtime.listener = listener  # so the menu bar can pause/resume it
     listener.start()
+
+
+def _start_health_watchdog(runtime: Runtime) -> None:
+    """Independently recycle the process if BirdNET stops making progress.
+
+    Stream-level faults are repaired inside AudioListener. A detector call that
+    never returns cannot be interrupted safely in Python, so this supervisor
+    exits the process and launchd's KeepAlive starts a clean model session.
+    Keeping this off the AppKit thread means UI trouble cannot disable recovery.
+    """
+    import time
+
+    def supervise() -> None:
+        while True:
+            time.sleep(5)
+            listener = getattr(runtime, "listener", None)
+            if listener is None:
+                continue
+            health = listener.health_snapshot()
+            if not health["restart_required"]:
+                continue
+            reason = health["restart_reason"] or "audio pipeline stalled"
+            log.error("Watchdog is restarting birdframe: %s", reason)
+            runtime.notify(
+                "Birdframe is restarting",
+                "The audio watchdog found a stalled detector; launchd will bring it back.")
+            os._exit(70)
+
+    threading.Thread(target=supervise, name="birdframe-watchdog", daemon=True).start()
 
 
 def _start_dashboard(runtime: Runtime, config: Config) -> None:
@@ -359,6 +400,7 @@ def main() -> None:
     config = Config.load()
     runtime = build_runtime(config)
     _start_listener(runtime, config)
+    _start_health_watchdog(runtime)
     _start_dashboard(runtime, config)
 
     from birdframe.menubar import BirdframeMenuBar

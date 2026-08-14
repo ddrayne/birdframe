@@ -590,12 +590,22 @@ def create_app(ctx: AppContext) -> FastAPI:
             return sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
 
         listening = getattr(rt, "status", "unknown") if rt else "unknown"
+        listener = getattr(rt, "listener", None) if rt else None
+        audio_health = listener.health_snapshot() if listener else None
+        if audio_health:
+            listening_ok = audio_health["healthy"]
+            listening = audio_health["state"]
+            if audio_health.get("detail") and listening != "listening":
+                listening = f"{listening}: {audio_health['detail']}"
+        else:
+            listening_ok = listening == "listening"
         archive = ctx.artist.archive_dir if hasattr(ctx.artist, "archive_dir") else None
         from birdframe.backups import backup_status
         backups = backup_status(Path(ctx.backup_dir)) if ctx.backup_dir else None
         return {
-            "listening": listening == "listening",
+            "listening": listening_ok,
             "status": listening,
+            "audio": audio_health,
             "last_detection_ago_s": _ago(ctx.store.last_detection_time()),
             "last_post_ago_s": _ago(getattr(rt, "last_post", None)),
             "species_today": len(ctx.store.species_for_day(now)),

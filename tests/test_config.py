@@ -9,6 +9,9 @@ def test_defaults_loaded_when_file_missing(tmp_path):
     assert cfg.post_mode == "daily"
     assert cfg.post_time == "21:00"
     assert cfg.frame_url == "http://pi-inky-impression.local:5000"
+    assert cfg.audio_callback_timeout_seconds == 10.0
+    assert cfg.audio_detector_timeout_seconds == 120.0
+    assert cfg.audio_flat_chunks == 3
 
 
 def test_roundtrip_save_and_load(tmp_path):

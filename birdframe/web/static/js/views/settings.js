@@ -133,12 +133,19 @@ export async function renderSettings(token) {
   setListening(health.listening, health.listening ? 'Listening' : health.status);
   const archiveMb = (health.archive_bytes / 1_048_576).toFixed(1);
   const backupMb = (health.backup_bytes / 1_048_576).toFixed(1);
+  const audio = health.audio || {};
+  const signal = audio.signal;
+  const signalLabel = signal
+    ? `${Number(signal.dynamic_rms_dbfs).toFixed(1)} dBFS changing signal`
+    : 'waiting for a measured audio chunk';
 
   app.innerHTML = `<article class="page">
     ${pageHeader('Care and feeding', 'Settings', 'The journal’s controls live away from the act of exploration. Detection history is never changed by ordinary settings edits.')}
     <section class="card card-pad"><div class="section-head" style="margin-top:0"><div><div class="eyebrow">System health</div><h2>birdframe right now</h2></div></div>
       <div class="health-grid">
         ${healthItem(health.listening, 'Microphone', health.status)}
+        ${healthItem(!audio.restart_required, 'Audio watchdog', `${audio.stream_restarts || 0} automatic reconnects · ${signalLabel}`)}
+        ${healthItem(!audio.restart_required, 'Detector flow', audio.last_audio_chunk_ago_s == null ? 'waiting for first chunk' : `last audio chunk ${ago(audio.last_audio_chunk_ago_s)}`)}
         ${healthItem(true, 'Last detection', ago(health.last_detection_ago_s))}
         ${healthItem(health.openai_key_set, 'Image artist', health.openai_key_set ? 'paint model ready' : 'fallback poster mode')}
         ${healthItem(true, 'Local archive', `${archiveMb} MB`)}

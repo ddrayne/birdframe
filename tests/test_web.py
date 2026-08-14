@@ -446,6 +446,32 @@ def test_health_endpoint(tmp_path):
     assert "backup_count" in h and "backup_latest" in h
 
 
+def test_health_endpoint_uses_audio_liveness_not_process_status(tmp_path):
+    from types import SimpleNamespace
+    _, ctx, client = _client(tmp_path)
+
+    class Listener:
+        def health_snapshot(self):
+            return {
+                "healthy": False, "state": "recovering",
+                "detail": "audio callback reported: device changed",
+                "last_callback_ago_s": 2, "last_audio_chunk_ago_s": 17,
+                "detector_processing_ago_s": None, "signal": None,
+                "stream_restarts": 1, "dropped_audio_blocks": 0,
+                "dropped_detector_chunks": 0, "last_callback_status": "device changed",
+                "restart_required": False, "restart_reason": None,
+            }
+
+    ctx.runtime = SimpleNamespace(
+        status="listening", listener=Listener(), last_post=None,
+        detector=SimpleNamespace(whitelist={"Robin"}),
+    )
+    health = client.get("/api/health").json()
+    assert health["listening"] is False
+    assert health["status"].startswith("recovering")
+    assert health["audio"]["stream_restarts"] == 1
+
+
 def test_manual_backup_endpoint_creates_restore_point(tmp_path):
     _, _, client = _client(tmp_path)
     response = client.post("/api/backup")

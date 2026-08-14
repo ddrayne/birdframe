@@ -17,6 +17,12 @@ DEFAULTS = {
     "blocked_species": [],         # common names you've vetoed as "not here"
     "chunk_seconds": 15.0,
     "chunk_overlap_seconds": 1.5,
+    # Audio liveness watchdog. A stale USB endpoint may remain "open" while
+    # returning no useful signal, so detection count alone is not a health check.
+    "audio_callback_timeout_seconds": 10.0,
+    "audio_detector_timeout_seconds": 120.0,
+    "audio_flat_chunks": 3,
+    "audio_flat_dynamic_dbfs": -90.0,
     "post_mode": "daily",          # daily | live | manual
     "post_time": "21:00",          # legacy single slot; used when post_times is empty
     "post_times": "",              # schedule: "HH:MM label, HH:MM, …" e.g. "06:30 dawn, 21:00 evening"
@@ -53,6 +59,10 @@ class Config:
     blocked_species: list
     chunk_seconds: float
     chunk_overlap_seconds: float
+    audio_callback_timeout_seconds: float
+    audio_detector_timeout_seconds: float
+    audio_flat_chunks: int
+    audio_flat_dynamic_dbfs: float
     post_mode: str
     post_time: str
     post_times: str

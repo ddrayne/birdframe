@@ -68,6 +68,10 @@ discarding stored detections.
 - **Stays out of your way, tells you when it matters** — menu bar status, a
   health panel, and macOS notifications for a new life-list bird, a lost mic, or
   a frame it can't reach.
+- **Repairs its own audio pipeline.** It distinguishes a genuinely quiet window
+  from a stale or flat USB feed, reopens the microphone after disconnects and
+  CoreAudio faults, and asks launchd for a clean process when BirdNET itself
+  stops making progress.
 
 The dashboard is installable as a PWA and reachable from your phone on the same
 network.
@@ -121,6 +125,15 @@ uv run birdframe make-app     # (re)create ~/Applications/Birdframe.app
 
 Logs: `~/Library/Logs/birdframe.log`. Data (SQLite, images, clips):
 `~/.local/share/birdframe/`. Settings: `~/.config/birdframe/config.toml`.
+
+The service is designed for unattended, continuous operation. There are three
+recovery layers: the audio watchdog reconnects an unhealthy stream with bounded
+backoff; the process watchdog exits on a stalled detector so the LaunchAgent can
+start a clean model session; and a quiet-hours daily refresh bounds slow native
+library or CoreAudio resource creep. **Settings → System health** reports the
+changing signal level, last completed audio chunk, and automatic reconnects.
+Detection count is not used as an audio health signal—a silent garden is valid
+as long as fresh, changing samples continue to arrive.
 
 ## Agent and MCP access
 

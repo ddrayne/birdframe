@@ -30,6 +30,8 @@ class BirdframeMenuBar(rumps.App):
         try:
             import datetime as _dt
             import os as _os
+            listener = getattr(self.runtime, "listener", None)
+            audio_health = listener.health_snapshot() if listener else None
             if self.runtime.should_restart_for_freshness(_dt.datetime.now()):
                 # A clean daily restart re-resolves the frame's mDNS name and
                 # bounds any slow resource creep. The LaunchAgent brings it back.
@@ -37,7 +39,8 @@ class BirdframeMenuBar(rumps.App):
             self.runtime.tick()
             species = self.runtime.species_today()
             n = len(species)
-            trouble = self.runtime.status.startswith("audio error")
+            trouble = (audio_health is not None and
+                       audio_health["state"] not in ("starting", "listening", "paused"))
             self.title = "⚠️🐦" if trouble else "🐦"
             self.menu["Species today: …"].title = f"Species today: {n}"
         except Exception as exc:  # never let the UI thread die
