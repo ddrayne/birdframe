@@ -99,3 +99,27 @@ def test_health_catches_callback_stall_even_if_stream_is_still_open():
     health = listener.health_snapshot()
     assert health["state"] == "audio stalled"
     assert health["healthy"] is False
+
+
+def test_repeated_reopen_failure_escalates_after_a_working_device_was_unplugged():
+    clock = [30.0]
+    listener = _listener(clock, process_restart_failures=2)
+    listener._stop.set()  # make recovery backoff return immediately in the unit test
+    listener._ever_received_callback = True
+    listener._open_failures = 1
+    listener._recover(
+        "audio error: Error opening InputStream: Internal PortAudio error")
+    health = listener.health_snapshot()
+    assert health["state"] == "restart required"
+    assert health["restart_required"] is True
+    assert "PortAudio" in health["restart_reason"]
+
+
+def test_missing_microphone_at_startup_does_not_create_process_restart_loop():
+    clock = [30.0]
+    listener = _listener(clock, process_restart_failures=2)
+    listener._stop.set()
+    listener._open_failures = 1
+    listener._recover(
+        "audio error: Error opening InputStream: Internal PortAudio error")
+    assert listener.health_snapshot()["restart_required"] is False

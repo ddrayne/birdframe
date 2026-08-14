@@ -140,6 +140,7 @@ class AudioListener:
                  monotonic: Callable[[], float] = time.monotonic,
                  callback_timeout_seconds: float = 10.0,
                  detector_timeout_seconds: float = 120.0,
+                 process_restart_failures: int = 3,
                  flat_chunks: int = 3,
                  flat_dynamic_dbfs: float = -90.0):
         self.sample_rate = sample_rate
@@ -151,6 +152,7 @@ class AudioListener:
         self.monotonic = monotonic
         self.callback_timeout_seconds = float(callback_timeout_seconds)
         self.detector_timeout_seconds = float(detector_timeout_seconds)
+        self.process_restart_failures = max(1, int(process_restart_failures))
         self._chunker = Chunker(
             chunk_samples=int(chunk_seconds * sample_rate),
             overlap_samples=int(overlap_seconds * sample_rate),
@@ -176,11 +178,13 @@ class AudioListener:
         self._fatal_reason: str | None = None
         self._stream_restarts = 0
         self._recovery_failures = 0
+        self._open_failures = 0
         self._healthy_chunks = 0
         self._dropped_blocks = 0
         self._dropped_chunks = 0
         self._consecutive_dropped_chunks = 0
         self._last_callback_status: str | None = None
+        self._ever_received_callback = False
 
     def start(self) -> None:
         self._detector_thread = threading.Thread(
@@ -238,6 +242,7 @@ class AudioListener:
                         self._stream_started_at = self.monotonic()
                         self._last_callback_at = None
                         self._restart_reason = None
+                        self._open_failures = 0
                     self._set_state("starting", "audio stream opened; checking signal")
                     self.on_status("listening")
                     while not self._stop.is_set():
@@ -279,6 +284,20 @@ class AudioListener:
         self._stream_restarts += 1
         self._recovery_failures += 1
         self._healthy_chunks = 0
+        # CoreAudio gives a reconnected USB device a new AudioObjectID. PortAudio
+        # can keep its old catalogue for the lifetime of the process, causing
+        # every subsequent InputStream open to fail with -9986. Repeated opens
+        # cannot repair that state; launchd must rebuild PortAudio in a clean
+        # process. Only escalate if this process previously received callbacks,
+        # otherwise an unplugged-at-startup mic would create a restart loop.
+        if "Error opening InputStream" in reason:
+            self._open_failures += 1
+        if (self._ever_received_callback and
+                self._open_failures >= self.process_restart_failures):
+            with self._lock:
+                self._fatal_reason = (
+                    "PortAudio could not bind the reconnected microphone after "
+                    f"{self._open_failures} open attempts")
         self._set_state("recovering", reason)
         self.on_status(f"recovering: {reason}")
         delay = min(300.0, 5.0 * (2 ** min(self._recovery_failures - 1, 6)))
@@ -324,6 +343,7 @@ class AudioListener:
     def _sd_callback(self, indata, frames, time_info, status):
         now = self.monotonic()
         with self._lock:
+            self._ever_received_callback = True
             self._last_callback_at = now
             if status:
                 self._last_callback_status = str(status)
@@ -361,6 +381,7 @@ class AudioListener:
             reading = self._last_reading
             callback_status = self._last_callback_status
             restarts = self._stream_restarts
+            open_failures = self._open_failures
             dropped_blocks = self._dropped_blocks
             dropped_chunks = self._dropped_chunks
         callback_age = None if callback_at is None else max(0.0, now - callback_at)
@@ -369,7 +390,7 @@ class AudioListener:
         restart_required = False
         restart_reason = None
         if fatal:
-            state, detail = "detector failed", fatal
+            state, detail = "restart required", fatal
             restart_required, restart_reason = True, fatal
         elif processing_age is not None and processing_age > self.detector_timeout_seconds:
             state = "detector stalled"
@@ -390,6 +411,7 @@ class AudioListener:
             "detector_processing_ago_s": None if processing_age is None else int(processing_age),
             "signal": asdict(reading) if reading else None,
             "stream_restarts": restarts,
+            "consecutive_open_failures": open_failures,
             "dropped_audio_blocks": dropped_blocks,
             "dropped_detector_chunks": dropped_chunks,
             "last_callback_status": callback_status,

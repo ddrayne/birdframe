@@ -11,6 +11,7 @@ def test_defaults_loaded_when_file_missing(tmp_path):
     assert cfg.frame_url == "http://pi-inky-impression.local:5000"
     assert cfg.audio_callback_timeout_seconds == 10.0
     assert cfg.audio_detector_timeout_seconds == 120.0
+    assert cfg.audio_process_restart_failures == 2
     assert cfg.audio_flat_chunks == 3
 
 

@@ -198,6 +198,7 @@ def _start_listener(runtime: Runtime, config: Config) -> None:
         on_status=on_status,
         callback_timeout_seconds=config.audio_callback_timeout_seconds,
         detector_timeout_seconds=config.audio_detector_timeout_seconds,
+        process_restart_failures=config.audio_process_restart_failures,
         flat_chunks=config.audio_flat_chunks,
         flat_dynamic_dbfs=config.audio_flat_dynamic_dbfs,
     )
@@ -228,7 +229,7 @@ def _start_health_watchdog(runtime: Runtime) -> None:
             log.error("Watchdog is restarting birdframe: %s", reason)
             runtime.notify(
                 "Birdframe is restarting",
-                "The audio watchdog found a stalled detector; launchd will bring it back.")
+                "The audio pipeline could not recover locally; launchd will bring it back.")
             os._exit(70)
 
     threading.Thread(target=supervise, name="birdframe-watchdog", daemon=True).start()

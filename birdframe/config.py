@@ -21,6 +21,7 @@ DEFAULTS = {
     # returning no useful signal, so detection count alone is not a health check.
     "audio_callback_timeout_seconds": 10.0,
     "audio_detector_timeout_seconds": 120.0,
+    "audio_process_restart_failures": 2,
     "audio_flat_chunks": 3,
     "audio_flat_dynamic_dbfs": -90.0,
     "post_mode": "daily",          # daily | live | manual
@@ -61,6 +62,7 @@ class Config:
     chunk_overlap_seconds: float
     audio_callback_timeout_seconds: float
     audio_detector_timeout_seconds: float
+    audio_process_restart_failures: int
     audio_flat_chunks: int
     audio_flat_dynamic_dbfs: float
     post_mode: str
