@@ -144,7 +144,7 @@ export async function renderSettings(token) {
     <section class="card card-pad"><div class="section-head" style="margin-top:0"><div><div class="eyebrow">System health</div><h2>birdframe right now</h2></div></div>
       <div class="health-grid">
         ${healthItem(health.listening, 'Microphone', health.status)}
-        ${healthItem(!audio.restart_required, 'Audio watchdog', `${audio.stream_restarts || 0} automatic reconnects · ${signalLabel}`)}
+        ${healthItem(!audio.restart_required, 'Audio watchdog', `${audio.stream_restarts || 0} reconnects · ${audio.automatic_unmutes || 0} mute repairs · ${signalLabel}`)}
         ${healthItem(!audio.restart_required, 'Detector flow', audio.last_audio_chunk_ago_s == null ? 'waiting for first chunk' : `last audio chunk ${ago(audio.last_audio_chunk_ago_s)}`)}
         ${healthItem(true, 'Last detection', ago(health.last_detection_ago_s))}
         ${healthItem(health.openai_key_set, 'Image artist', health.openai_key_set ? 'paint model ready' : 'fallback poster mode')}

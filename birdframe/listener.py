@@ -18,6 +18,11 @@ from typing import Callable
 import numpy as np
 
 
+def _ensure_input_unmuted(device: str | None) -> bool:
+    from birdframe.coreaudio import ensure_input_unmuted
+    return ensure_input_unmuted(device)
+
+
 def _dbfs(value: float) -> float:
     return float(20 * np.log10(max(float(value), 1e-12)))
 
@@ -140,9 +145,10 @@ class AudioListener:
                  monotonic: Callable[[], float] = time.monotonic,
                  callback_timeout_seconds: float = 10.0,
                  detector_timeout_seconds: float = 120.0,
-                 process_restart_failures: int = 3,
+                 process_restart_failures: int = 2,
                  flat_chunks: int = 3,
-                 flat_dynamic_dbfs: float = -90.0):
+                 flat_dynamic_dbfs: float = -90.0,
+                 ensure_unmuted: Callable[[str | None], bool] = _ensure_input_unmuted):
         self.sample_rate = sample_rate
         self.chunk_seconds = float(chunk_seconds)
         self.device = device or None
@@ -153,6 +159,7 @@ class AudioListener:
         self.callback_timeout_seconds = float(callback_timeout_seconds)
         self.detector_timeout_seconds = float(detector_timeout_seconds)
         self.process_restart_failures = max(1, int(process_restart_failures))
+        self.ensure_unmuted = ensure_unmuted
         self._chunker = Chunker(
             chunk_samples=int(chunk_seconds * sample_rate),
             overlap_samples=int(overlap_seconds * sample_rate),
@@ -185,6 +192,7 @@ class AudioListener:
         self._consecutive_dropped_chunks = 0
         self._last_callback_status: str | None = None
         self._ever_received_callback = False
+        self._automatic_unmutes = 0
 
     def start(self) -> None:
         self._detector_thread = threading.Thread(
@@ -235,6 +243,15 @@ class AudioListener:
                 self._chunker.reset()
                 self._signal_monitor.reset()
                 self._restart_stream.clear()
+                try:
+                    if self.ensure_unmuted(self.device):
+                        with self._lock:
+                            self._automatic_unmutes += 1
+                        self.on_status("unmuted microphone input")
+                except Exception as exc:
+                    # A control-query failure must never prevent capture. The
+                    # signal watchdog will still catch a muted/flat feed.
+                    self.on_status(f"audio control warning: {exc}")
                 with sd.InputStream(samplerate=self.sample_rate, channels=1,
                                     dtype="float32", device=self.device,
                                     callback=self._sd_callback):
@@ -382,6 +399,7 @@ class AudioListener:
             callback_status = self._last_callback_status
             restarts = self._stream_restarts
             open_failures = self._open_failures
+            automatic_unmutes = self._automatic_unmutes
             dropped_blocks = self._dropped_blocks
             dropped_chunks = self._dropped_chunks
         callback_age = None if callback_at is None else max(0.0, now - callback_at)
@@ -412,6 +430,7 @@ class AudioListener:
             "signal": asdict(reading) if reading else None,
             "stream_restarts": restarts,
             "consecutive_open_failures": open_failures,
+            "automatic_unmutes": automatic_unmutes,
             "dropped_audio_blocks": dropped_blocks,
             "dropped_detector_chunks": dropped_chunks,
             "last_callback_status": callback_status,

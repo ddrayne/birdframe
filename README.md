@@ -128,7 +128,8 @@ Logs: `~/Library/Logs/birdframe.log`. Data (SQLite, images, clips):
 
 The service is designed for unattended, continuous operation. There are three
 recovery layers: the audio watchdog reconnects an unhealthy stream with bounded
-backoff; the process watchdog exits on a stalled detector so the LaunchAgent can
+backoff and clears a USB input's hidden CoreAudio mute; the process watchdog
+exits on a stalled detector so the LaunchAgent can
 start a clean model session; and a quiet-hours daily refresh bounds slow native
 library or CoreAudio resource creep. **Settings → System health** reports the
 changing signal level, last completed audio chunk, and automatic reconnects.
