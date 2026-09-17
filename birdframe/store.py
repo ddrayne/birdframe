@@ -921,6 +921,19 @@ class Store:
         ).fetchone()
         return datetime.strptime(row["t"], _ISO) if row["t"] else None
 
+    def last_automatic_image_at(self) -> datetime | None:
+        """When the scheduler last produced an edition, posted or not.
+
+        An unreachable frame must not turn a process restart into a second
+        attempt at the same slot. Manual and studio images are user actions,
+        so they do not advance the automatic schedule here.
+        """
+        row = self._conn.execute(
+            "SELECT MAX(generated_at) AS t FROM images"
+            " WHERE trigger IN ('scheduled', 'live')"
+        ).fetchone()
+        return datetime.strptime(row["t"], _ISO) if row["t"] else None
+
     def real_posted_on_day(self, day: str) -> bool:
         """Whether a real painting (not a fallback poster) has been posted to
         the frame for this day — a poster must never replace one."""

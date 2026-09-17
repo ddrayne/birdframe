@@ -58,8 +58,9 @@ def test_saves_best_clip_and_notifies_first_ever(tmp_path):
     assert firsts == ["European Robin"]      # notified once, first-ever
 
 
-def test_failed_post_retries_until_frame_returns(tmp_path):
+def test_failed_post_is_archived_without_later_retry(tmp_path):
     from datetime import datetime as _dt
+    from types import SimpleNamespace
     store = Store(tmp_path / "db.sqlite")
     img = tmp_path / "pic.png"; img.write_bytes(b"PNG")
     rec_id = store.add_image(_dt(2026, 7, 8, 21), str(img), "linocut", "p", ["Robin"])
@@ -69,27 +70,35 @@ def test_failed_post_retries_until_frame_returns(tmp_path):
             return store.get_image(rec_id)
 
     class Pub:
-        def __init__(self): self.result = "unreachable"; self.calls = 0
-        def publish(self, png, force=False): self.calls += 1; return _R(self.result)
+        def __init__(self): self.calls = []
+        def publish(self, png, force=False):
+            self.calls.append(force)
+            return _R("unreachable")
 
     class _R:
         def __init__(self, s): self.status = s; self.detail = ""
 
     rt = Runtime.for_test(store=store, detector=None, now=lambda: _dt(2026, 7, 8, 21))
     rt.artist, rt.publisher = Art(), Pub()
-    # scheduled post fails → becomes pending, not marked posted
+    rt.config = SimpleNamespace(
+        post_mode="daily", post_times="21:00 evening", post_time="21:00",
+        live_min_gap_minutes=120, live_window_start="08:00",
+        live_window_end="22:00", backup_keep_days=0,
+    )
+    notes = []
+    rt.notify = lambda title, message: notes.append((title, message))
+
+    # The one explicit attempt fails, so the picture stays safely archived.
     rt.post_now(_dt(2026, 7, 8, 21))
-    assert rt._pending_post_id == rec_id
+    assert rt.publisher.calls == [False]
     assert store.get_image(rec_id).posted_at is None
-    # a later tick retries; still down → stays pending
-    rt.publisher.result = "unreachable"
-    rt.retry_pending_post(_dt(2026, 7, 8, 21, 5))
-    assert rt._pending_post_id == rec_id
-    # frame returns → posts and clears the pending flag
-    rt.publisher.result = "posted"
-    rt.retry_pending_post(_dt(2026, 7, 8, 21, 10))
-    assert rt._pending_post_id is None
-    assert store.get_image(rec_id).posted_at is not None
+    assert notes == [("Couldn't reach the frame",
+                      "Today's picture is saved in the archive. The frame was left alone.")]
+
+    # Later scheduler ticks must not retry or force past a manual frame hold.
+    rt.tick(_dt(2026, 7, 8, 21, 5))
+    assert rt.publisher.calls == [False]
+    assert store.get_image(rec_id).posted_at is None
 
 
 def test_should_restart_for_freshness(tmp_path):
@@ -264,3 +273,28 @@ def test_restart_rehydrates_last_post_from_store(tmp_path):
     rt = Runtime(config=None, store=store, detector=None, artist=Art(),
                  publisher=None, now=lambda: _dt(2026, 7, 5, 7, 0))
     assert rt.last_post == _dt(2026, 7, 5, 6, 31)
+
+
+def test_restart_treats_unposted_scheduled_image_as_handled(tmp_path):
+    """A failed frame delivery is archived, not retried after a restart."""
+    from datetime import datetime as _dt
+    from types import SimpleNamespace
+    store = Store(tmp_path / "db.sqlite")
+    img = tmp_path / "pic.png"; img.write_bytes(b"PNG")
+    store.add_image(_dt(2026, 7, 5, 21), str(img), "linocut", "p", ["Robin"],
+                    trigger="scheduled")
+
+    class Art:
+        def generate(self, **kw):
+            raise AssertionError("should not generate — failed slot was already handled")
+
+    rt = Runtime(config=None, store=store, detector=None, artist=Art(),
+                 publisher=None, now=lambda: _dt(2026, 7, 5, 22, 0))
+    rt.config = SimpleNamespace(
+        post_mode="daily", post_times="08:00 morning, 21:00 evening",
+        post_time="21:00", live_min_gap_minutes=120,
+        live_window_start="08:00", live_window_end="22:00",
+        backup_keep_days=0,
+    )
+    assert rt.last_post == _dt(2026, 7, 5, 21)
+    rt.tick(_dt(2026, 7, 5, 22, 0))

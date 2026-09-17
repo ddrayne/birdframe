@@ -29,10 +29,15 @@ class Runtime:
         self.notify = notify or (lambda title, msg: None)
         self.new_species_today = False
         # Rehydrate from the store so a mid-day restart doesn't re-fire a
-        # schedule slot that already posted.
-        self.last_post: datetime | None = store.last_posted_at() if store else None
+        # schedule slot that was already handled. A failed delivery still
+        # counts as handled: its image remains archived and the shared frame
+        # must not be revisited later.
+        handled = []
+        if store:
+            handled = [store.last_posted_at(), store.last_automatic_image_at()]
+        self.last_post: datetime | None = max(
+            (when for when in handled if when is not None), default=None)
         self.last_detection_at: datetime | None = None
-        self._pending_post_id: int | None = None
         self.status = "starting"
         self._seen_today: set[str] = set()
         self._today = now().date()
@@ -56,7 +61,6 @@ class Runtime:
         rt.new_species_today = False
         rt.last_post = None
         rt.last_detection_at = None
-        rt._pending_post_id = None
         rt.status = "starting"
         rt._seen_today = set()
         rt._today = now().date()
@@ -144,8 +148,6 @@ class Runtime:
         if decision:
             trigger, slot = decision
             self.scheduled_post(now, trigger, slot)
-        else:
-            self.retry_pending_post(now)      # keep trying a frame that was down
 
     def scheduled_post(self, when: datetime, trigger: str,
                        slot: tuple[str, str] | None) -> str:
@@ -178,11 +180,9 @@ class Runtime:
             result = self.publisher.publish(fh.read())
         if result.status == "posted":
             self.store.mark_posted(rec.id, when)
-            self._pending_post_id = None
         elif result.status == "unreachable":
-            self._pending_post_id = rec.id    # retry on later ticks until it lands
             self.notify("Couldn't reach the frame",
-                        "The picture is saved and will post itself when the frame returns.")
+                        "The picture is saved in the archive. The frame was left alone.")
         self.new_species_today = False
         return result.status
 
@@ -207,26 +207,6 @@ class Runtime:
             log.warning("Database backup failed: %s", exc)
             return None
 
-    def retry_pending_post(self, now: datetime | None = None) -> str | None:
-        """If an automatic post couldn't reach the frame, quietly retry it (on
-        each tick) until the frame reappears — so a dropped connection self-heals."""
-        pending = getattr(self, "_pending_post_id", None)
-        if pending is None:
-            return None
-        now = now or self.now()
-        rec = self.store.get_image(pending)
-        if rec is None:
-            self._pending_post_id = None
-            return None
-        with open(rec.path, "rb") as fh:
-            result = self.publisher.publish(fh.read(), force=True)
-        if result.status in ("posted", "held"):
-            if result.status == "posted":
-                self.store.mark_posted(rec.id, now)
-                self.notify("Picture posted 🐦", "The frame came back — today's picture is up.")
-            self._pending_post_id = None
-        return result.status
-
     def post_now(self, when: datetime | None = None, force_paid: bool = False) -> str:
         when = when or self.now()
         rec = self.artist.generate(when, force_paid=force_paid)
@@ -237,11 +217,9 @@ class Runtime:
             result = self.publisher.publish(fh.read(), force=force_paid)
         if result.status == "posted":
             self.store.mark_posted(rec.id, when)
-            self._pending_post_id = None
         elif result.status == "unreachable":
-            self._pending_post_id = rec.id    # retry on later ticks until it lands
             self.notify("Couldn't reach the frame",
-                        "Today's picture is saved and will post itself when the frame returns.")
+                        "Today's picture is saved in the archive. The frame was left alone.")
         self.last_post = when
         self.new_species_today = False
         return result.status

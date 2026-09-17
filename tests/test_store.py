@@ -327,6 +327,16 @@ def test_last_posted_at(tmp_path):
     assert s.last_posted_at() == datetime(2026, 7, 5, 12, 1)
 
 
+def test_last_automatic_image_at_ignores_manual_and_includes_unposted(tmp_path):
+    s = Store(tmp_path / "db.sqlite")
+    assert s.last_automatic_image_at() is None
+    s.add_image(datetime(2026, 7, 5, 20), "/tmp/a.png", "ukiyo-e", "p", ["Robin"],
+                trigger="scheduled")
+    s.add_image(datetime(2026, 7, 5, 21), "/tmp/b.png", "linocut", "p", ["Robin"],
+                trigger="manual")
+    assert s.last_automatic_image_at() == datetime(2026, 7, 5, 20)
+
+
 def test_real_posted_on_day_excludes_fallbacks_and_unposted(tmp_path):
     s = Store(tmp_path / "db.sqlite")
     day = "2026-07-05"
