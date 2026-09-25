@@ -14,13 +14,17 @@ _CREAM = (245, 246, 240)
 _GOLD = (196, 135, 43)     # dawn-gold, for the eye/beak accent
 
 
-def render_icon(size: int) -> bytes:
+def render_icon(size: int, rounded: bool = True) -> bytes:
+    """`rounded=False` fills the whole square, for platforms (iOS home screen)
+    that apply their own mask and would paint transparent corners black."""
     # Supersample for smooth edges, then downscale.
     s = size * 4
     img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    r = int(s * 0.22)
-    d.rounded_rectangle([0, 0, s - 1, s - 1], radius=r, fill=_GREEN)
+    if rounded:
+        d.rounded_rectangle([0, 0, s - 1, s - 1], radius=int(s * 0.22), fill=_GREEN)
+    else:
+        d.rectangle([0, 0, s - 1, s - 1], fill=_GREEN)
 
     # Bird: body, head, tail, wing, beak — plump songbird silhouette.
     cx, cy = s * 0.46, s * 0.54

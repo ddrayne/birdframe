@@ -647,3 +647,56 @@ def test_settings_groups_carry_name(tmp_path):
     _, _, client = _client(tmp_path)
     data = client.get("/api/settings").json()
     assert all("name" in g and g["name"] for g in data["groups"])
+
+
+def _archived_png(store, tmp_path, name="edition.png"):
+    import io as _io
+    from PIL import Image as _Image
+    path = tmp_path / "images" / name
+    path.parent.mkdir(exist_ok=True)
+    buf = _io.BytesIO()
+    _Image.new("RGB", (1200, 1600), (40, 90, 60)).save(buf, format="PNG")
+    path.write_bytes(buf.getvalue())
+    return store.add_image(datetime(2026, 7, 5, 21), str(path), "linocut", "p",
+                           ["European Robin"])
+
+
+def test_gallery_thumbnails_are_small_cached_jpegs(tmp_path):
+    import io as _io
+    from PIL import Image as _Image
+    store, _, client = _client(tmp_path)
+    image_id = _archived_png(store, tmp_path)
+    full = client.get(f"/api/image/{image_id}")
+    assert full.headers["content-type"] == "image/png"
+    assert "max-age" in full.headers["cache-control"]
+    thumb = client.get(f"/api/image/{image_id}?w=300")
+    assert thumb.status_code == 200 and thumb.headers["content-type"] == "image/jpeg"
+    assert _Image.open(_io.BytesIO(thumb.content)).size == (480, 640)   # next cached width
+    cached = list((tmp_path / "images" / "derived").iterdir())
+    assert [p.name for p in cached] == ["edition-w480.jpg"]
+    assert client.get(f"/api/image/{image_id}?w=480").content == thumb.content
+    assert client.get("/api/image/999?w=300").status_code == 404
+
+
+def test_app_shell_revalidates_so_updates_never_mix_module_versions(tmp_path):
+    _, _, client = _client(tmp_path)
+    assert client.get("/").headers["cache-control"] == "no-cache"
+    assert client.get("/static/js/core.js").headers["cache-control"] == "no-cache"
+    assert "cache-control" not in client.get("/api/today").headers
+
+
+def test_day_detail_links_to_neighbouring_days(tmp_path):
+    store, _, client = _client(tmp_path)          # has 2026-07-05
+    store.add_detection(Detection(datetime(2026, 7, 2, 6), "Erithacus rubecula", "European Robin", 0.9))
+    day = client.get("/api/day/2026-07-05").json()
+    assert day["older"] == "2026-07-02" and day["newer"] is None
+    assert client.get("/api/day/2026-07-02").json()["newer"] == "2026-07-05"
+
+
+def test_apple_touch_icon_is_full_bleed(tmp_path):
+    import io as _io
+    from PIL import Image as _Image
+    _, _, client = _client(tmp_path)
+    icon = _Image.open(_io.BytesIO(client.get("/apple-touch-icon.png").content)).convert("RGBA")
+    assert icon.size == (180, 180)
+    assert icon.getpixel((0, 0))[3] == 255          # no transparent corner for iOS to blacken
