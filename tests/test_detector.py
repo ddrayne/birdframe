@@ -69,3 +69,14 @@ def test_predict_chunk_uses_model(mocker):
     assert out[0].common_name == "European Robin"
     assert out[0].segment_start_s == 0 and out[0].segment_end_s == 1
     det._session.run_arrays.assert_called_once()
+
+
+def test_litert_runs_the_models_when_tensorflow_is_absent():
+    from birdframe.detector import model_options
+    only = lambda *present: (lambda name: object() if name in present else None)  # noqa: E731
+    assert model_options(only("ai_edge_litert")) == {"library": "litert"}
+    # An existing TensorFlow setup keeps birdnet's default.
+    assert model_options(only("tensorflow", "ai_edge_litert")) == {}
+    assert model_options(only("tensorflow")) == {}
+    # Neither: leave it to birdnet, which explains what to install.
+    assert model_options(only()) == {}
