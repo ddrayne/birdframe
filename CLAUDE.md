@@ -48,11 +48,19 @@ There is no separate lint/typecheck step configured; pytest is the gate.
 
 ## Architecture
 
-Single process. `rumps` owns the macOS main thread (menu bar); the audio
-listener, BirdNET detector, scheduler, and a `uvicorn`/FastAPI dashboard run on
-worker threads, all sharing one WAL-mode SQLite store. Audio is analysed in
-memory in ~15s chunks and **never written to disk**. `birdframe/app.py:main` is
-the wiring seam — read it first to see how the pieces connect.
+Single process. `rumps` owns the macOS main thread (menu bar), which only
+displays state; the audio listener, BirdNET detector, scheduler
+(`app._start_scheduler`, which also performs the nightly restart), watchdog and
+a `uvicorn`/FastAPI dashboard run on worker threads, all sharing one WAL-mode
+SQLite store. Never do slow work (renders, frame posts) on the AppKit thread.
+Audio is analysed in memory in ~15s chunks and **never written to disk**.
+`birdframe/app.py:main` is the wiring seam — read it first to see how the
+pieces connect.
+
+Every public `Store` method holds one lock that the detector thread also needs
+for each chunk, so dashboard queries must stay index-backed and cheap. A slow
+query stalls detection, and a long enough stall trips the watchdog's
+"cannot keep up" restart. `/api/now` is polled every 5s while Today is open.
 
 Data flow: `listener → detector → store → artist → publisher → Inky Frame`, with
 the `menubar` and `web` dashboard both driving a shared `runtime.Runtime`.
@@ -75,10 +83,12 @@ Key design boundaries worth preserving:
   `http_get`/`http_post`, and `sdk=`/`image_client=` parameters — use them in
   tests instead of patching globals.
 - **The frame is shared** with other people/clients. The `publisher` posts
-  politely: `source=birdframe`, a modest `hold_minutes`, **never** `force`, and
-  treats HTTP 409 (held by someone else) as "leave it be". Every image is
-  archived locally first, so an unreachable frame loses nothing. Don't add retry
-  logic that would re-stomp the frame hours later.
+  politely: `source=birdframe`, a modest `hold_minutes`, never `force` for
+  automatic posts (an explicit user "send"/"post now" does force), one
+  `Idempotency-Key` per publish (shared by its retries), and treats HTTP 409
+  (held by someone else) as "leave it be". Every image is archived locally
+  first, so an unreachable frame loses nothing. Don't add retry logic that
+  would re-stomp the frame hours later.
 - **Artist always produces an image.** The paid painter is duck-typed
   (`image_client.py`: `OpenAIImageClient` or `GeminiImageClient`, selected by
   `config.image_provider` in `app._make_image_client`). If it fails (or no key
@@ -87,7 +97,14 @@ Key design boundaries worth preserving:
   report.
 
 Output is always exactly **1200×1600** (`compose.FRAME_W/FRAME_H`): art fills
-the top 1500px, a caption strip (date + species) the bottom 100px.
+the top 1500px, a caption strip (date + species) the bottom 100px. gpt-image-2
+and later render natively at 1200×1504; `compose` fills the art area with any
+render within 3% of 4:5 and letterboxes a real mismatch (never crops birds).
+The frame (github.com/ddrayne/inky-frame) Floyd–Steinberg-dithers everything
+onto six inks whose "white" is light grey, so caption text is pure black (grey
+text prints as speckles); `compose.eink_preview` reproduces that pipeline for
+the dashboard's "On the frame" view. Prompts must not contain numbers — counts
+come back as printed digits or as that many birds.
 
 ## Reliability & false positives
 
@@ -112,7 +129,13 @@ hard-veto a species via the "not here" blocklist (`config.blocked_species`).
   `gpt-4.1-mini`, cached per day, template fallback.
 - **Health** (`/api/health`) + macOS notifications (`app._notify`): mic loss,
   unreachable frame, life-list firsts.
-- **Icon/PWA** (`icon.py` renders the app icon; manifest + `sw.js`).
+- **Icon/PWA** (`icon.py` renders the app icon; manifest + `sw.js`). The shell
+  and ES modules are served `Cache-Control: no-cache` (modules are imported
+  without version stamps); bump `?v=` in `index.html`/`sw.js` with UI changes.
+- **Dashboard images**: lists use `/api/image/{id}?w=` (cached JPEGs in
+  `images/derived/`), never the 3 MB originals; `/api/image/{id}/eink` is the
+  simulated frame print. State-changing requests labelled
+  `Sec-Fetch-Site: cross-site` are refused (the dashboard is LAN-wide, unauthenticated).
 - CLI: `birdframe set-key | doctor | --help`.
 
 ## Styles
