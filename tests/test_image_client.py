@@ -116,3 +116,36 @@ def test_gemini_retries_then_raises(mocker):
     with pytest.raises(RuntimeError):
         client.generate("p")
     assert fake.models.generate_content.call_count == 3
+
+
+@pytest.mark.parametrize("model, size", [
+    ("gpt-image-2", "1200x1504"),               # custom sizes: the frame's own 4:5
+    ("gpt-image-2.5-sunburst", "1200x1504"),
+    ("gpt-image-2.5-flare-2026-09-08", "1200x1504"),
+    ("gpt-image-1.5", "1024x1536"),             # fixed sizes only
+])
+def test_openai_requests_the_frames_aspect_when_the_model_allows(mocker, model, size):
+    fake = mocker.Mock()
+    fake.images.generate.return_value = mocker.Mock(
+        data=[mocker.Mock(b64_json=base64.b64encode(b"PNG").decode())])
+    OpenAIImageClient(api_key="k", model=model, sdk=fake).generate("p")
+    assert fake.images.generate.call_args.kwargs["size"] == size
+
+
+@pytest.mark.parametrize("model, asked, sent", [
+    ("gpt-image-2.5-sunburst", "xhigh", "xhigh"),
+    ("gpt-image-2.5-flare", "max", "max"),
+    ("gpt-image-2", "xhigh", "high"),           # tier doesn't exist there: best valid
+    ("gpt-image-2", "medium", "medium"),
+])
+def test_openai_quality_tiers_are_only_sent_where_they_exist(mocker, model, asked, sent):
+    fake = mocker.Mock()
+    fake.images.generate.return_value = mocker.Mock(
+        data=[mocker.Mock(b64_json=base64.b64encode(b"PNG").decode())])
+    OpenAIImageClient(api_key="k", model=model, quality=asked, sdk=fake).generate("p")
+    assert fake.images.generate.call_args.kwargs["quality"] == sent
+
+
+def test_gemini_top_quality_tiers_stay_at_2k(mocker):
+    assert GeminiImageClient(api_key="k", quality="xhigh", sdk=mocker.Mock()).image_size == "2K"
+    assert GeminiImageClient(api_key="k", quality="low", sdk=mocker.Mock()).image_size == "1K"

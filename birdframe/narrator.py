@@ -33,8 +33,9 @@ def narrate(species: list[str], weather: str, season: str, tod: str,
              f"Birds heard (most first): {', '.join(species) if species else 'none'}. "
              + (f"First to sing at dawn: {dawn_bird}." if dawn_bird else ""))
     try:
+        # max_completion_tokens: newer chat models reject the older max_tokens.
         resp = client.chat.completions.create(
-            model=model, temperature=0.8, max_tokens=60,
+            model=model, temperature=0.8, max_completion_tokens=60,
             messages=[{"role": "system", "content": SYSTEM},
                       {"role": "user", "content": facts}],
         )

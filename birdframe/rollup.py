@@ -150,6 +150,54 @@ def profile_to_dict(profile: ArtProfile) -> dict:
     return data
 
 
+_PRECIPITATION = ("rain", "drizzle", "shower", "snow", "sleet")
+
+# Number-free phrases for the day's rhythm. Counts in a prompt tend to come
+# back as printed digits, or as that many birds.
+_CHARACTER = {
+    "dawn-heavy": "most of its song came at dawn",
+    "dusk-heavy": "its chorus gathered toward evening",
+    "night-active": "voices carried on into the night",
+    "all-day": "song ran from early until late",
+    "species-rich": "an unusually varied chorus",
+    "even-chorus": "many voices in balance",
+    "dominant-species": "one voice held the day",
+    "sparse": "a quiet, spacious day",
+}
+
+
+# A note that only restates the archetype is left out.
+_ARCHETYPE_NOTES = {
+    "Dawn chorus": "dawn-heavy", "Evening gathering": "dusk-heavy",
+    "Night watch": "night-active", "All-day soundscape": "all-day",
+    "Singular voice": "dominant-species", "Quiet garden": "sparse",
+}
+
+
+def _a(phrase: str) -> str:
+    return f"{'an' if phrase[:1].lower() in 'aeiou' else 'a'} {phrase}"
+
+
+def _setting(weather: str, season: str, tod: str) -> str:
+    moment = _a(f"{season} {tod}")
+    if any(word in weather for word in _PRECIPITATION):
+        return f"an Edinburgh garden on {moment} in {weather}"   # "... in light rain"
+    return f"an Edinburgh garden on {moment} under {weather} skies"
+
+
+def _voice(s: SpeciesDay) -> str:
+    # The scientific name pins down the exact species where English names
+    # differ between checklists and field guides.
+    return f"{s.common_name} ({s.scientific_name})" if s.scientific_name else s.common_name
+
+
+def _character(profile: ArtProfile) -> str:
+    skip = _ARCHETYPE_NOTES.get(profile.archetype)
+    notes = [_CHARACTER[tag] for tag in profile.tags if tag in _CHARACTER and tag != skip]
+    return f"the day's character: {_a(profile.archetype.lower())}" + (
+        f" — {', '.join(notes[:3])}" if notes else "")
+
+
 def build_scene(species: list[SpeciesDay], first_ever: set[str],
                 weather: str, when: datetime, profile: ArtProfile | None = None) -> str:
     season = season_for(when)
@@ -160,31 +208,40 @@ def build_scene(species: list[SpeciesDay], first_ever: set[str],
     ranked = species  # already sorted by count desc from the store
     dawn = min(species, key=lambda s: s.first_heard)
     latest = max(species, key=lambda s: s.last_heard)
-    parts = [f"an Edinburgh garden on a {weather} {season} {tod}"]
+    parts = [_setting(weather, season, tod)]
     lead = ranked[0]
-    parts.append(f"{lead.common_name} singing prominently (heard {lead.count} "
-                 f"times today)")
-    for s in ranked[1:6]:
-        parts.append(s.common_name)
-    parts.append(f"{dawn.common_name} opened the dawn chorus")
-    parts.append(f"{latest.common_name} sang latest into the {tod}")
+    parts.append(f"the {_voice(lead)} singing prominently as the day's leading voice")
+    others = [_voice(s) for s in ranked[1:6]]
+    if others:
+        joined = others[0] if len(others) == 1 else f"{', '.join(others[:-1])} and {others[-1]}"
+        parts.append(f"with {joined} nearby")
+    if len(species) > 1:     # with one voice these would only repeat the lead
+        parts.append(f"the {dawn.common_name} opened the dawn chorus")
+        parts.append(f"the {latest.common_name} sang latest into the {tod}")
     debuts = [s.common_name for s in ranked if s.common_name in first_ever]
     if debuts:
-        parts.append("first ever heard here today: " + ", ".join(debuts))
+        parts.append("heard here for the very first time today, and quietly honoured: "
+                     + ", ".join(debuts))
     if profile is not None:
-        parts.append(f"the acoustic character of the day was {profile.summary.lower()}")
-        parts.append("translate detection volume into visual rhythm, layering and negative "
+        parts.append(_character(profile))
+        parts.append("translate the day's activity into visual rhythm, layering and negative "
                      "space, never into a literal number of individual birds")
     return "; ".join(parts)
 
 
 ACCURACY = ("Render every bird's plumage, size, beak shape and markings accurately "
-            "and true to the real species, so each is recognisable to a birdwatcher.")
+            "and true to the real species, so each is recognisable to a birdwatcher, "
+            "and keep their sizes true to one another.")
+
+# The picture hangs on an e-ink frame across a room; clear value structure
+# survives its limited palette far better than faint washes.
+DISPLAY = ("It will hang on an e-ink picture frame, so let the composition read "
+           "clearly from across a room, with confident tonal contrast.")
 
 
 def build_prompt(style: Style, scene: str) -> str:
     prompt = style.prompt.replace("{scene}", scene).strip()
-    prompt += f"\n\n{ACCURACY}"
+    prompt += f"\n\n{ACCURACY} {DISPLAY}"
     if style.avoid:
         prompt += f"\n\nAvoid: {style.avoid}"
     return prompt
