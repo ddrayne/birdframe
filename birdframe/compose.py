@@ -18,10 +18,21 @@ INK = (0, 0, 0)
 FILL_TOLERANCE = 0.03
 
 
+# A Mac's Georgia first, then the serifs a Raspberry Pi or other Linux box
+# usually has (fonts-liberation, fonts-dejavu-core, fonts-noto-core).
+FONT_PATHS = (
+    "/System/Library/Fonts/Supplemental/Georgia.ttf",
+    "/usr/share/fonts/truetype/liberation2/LiberationSerif-Regular.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSerif-Regular.ttf",
+    "/System/Library/Fonts/Helvetica.ttc",
+    "/Library/Fonts/Arial.ttf",
+)
+
+
 def _font(size: int):
-    for path in ("/System/Library/Fonts/Supplemental/Georgia.ttf",
-                 "/System/Library/Fonts/Helvetica.ttc",
-                 "/Library/Fonts/Arial.ttf"):
+    for path in FONT_PATHS:
         try:
             return ImageFont.truetype(path, size)
         except OSError:

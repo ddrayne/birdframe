@@ -34,9 +34,27 @@ log = logging.getLogger("birdframe")
 
 TEMPLATE_DIR = Path(__file__).resolve().parent / "public_template"
 IMAGE_WIDTHS = (480, 960, 1200)
+# Honoured by Cloudflare Pages and Netlify: a painting's files never change
+# once published (each has its own name), and the stylesheet and script are
+# fetched with a content version. The page itself is always revalidated.
+HEADERS_FILE = """\
+/images/*
+  Cache-Control: public, max-age=31536000, immutable
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+/art/*
+  Cache-Control: public, max-age=86400
+"""
 
 
 def _write_atomic(path: Path, data: bytes) -> None:
+    """Replace a file whole, and leave it alone when nothing changed (hourly
+    rebuilds shouldn't rewrite hundreds of files on a Pi's SD card)."""
+    try:
+        if path.read_bytes() == data:
+            return
+    except OSError:
+        pass
     path.parent.mkdir(parents=True, exist_ok=True)
     partial = path.with_name(f".{path.name}.partial")
     partial.write_bytes(data)
@@ -267,12 +285,18 @@ def build_site(store, styles, out_dir: Path, *, place: str = "Edinburgh",
     }.items():
         page = page.replace(token, value)
     _write_atomic(out_dir / "index.html", page.encode())
+    _write_atomic(out_dir / "_headers", HEADERS_FILE.encode())
 
     for folder in (images_dir, art_dir):   # drop what the archive no longer has
         for stale in (p for p in folder.glob("*") if p.name not in keep) if folder.exists() else ():
             stale.unlink()
+    # What the site says, apart from when it was built: lets a deploy skip an
+    # upload when nothing has changed since the last one.
+    unstamped = json.dumps([{k: v for k, v in site.items() if k != "generated"},
+                            assets, sorted(keep)], sort_keys=True, default=str)
     return {"paintings": len(paintings), "species": len(species), "days": len(days),
-            "path": str(out_dir)}
+            "path": str(out_dir),
+            "fingerprint": hashlib.sha256(unstamped.encode()).hexdigest()[:16]}
 
 
 def _og_image(src: Path) -> bytes:
@@ -293,61 +317,110 @@ def deploy(out_dir: Path, command: str, timeout: float = 600) -> str:
 
 
 class SitePublisher:
-    """Rebuilds (and optionally deploys) the public site off the main loop:
-    after each new painting, and otherwise at most every `refresh_seconds`
-    so the season's figures stay current."""
+    """Keeps the public site current, off the main loop.
+
+    It rebuilds the local folder after each new painting and otherwise every
+    `refresh_seconds`, so the season's figures stay fresh. When a `deploy` is
+    configured (a callable that uploads the folder and may return the site's
+    address) it uploads at once for a new painting, and otherwise at most
+    every `deploy_seconds`, and only when something changed. A failure waits
+    `retry_seconds` before the next try, and the last upload is remembered in
+    `state_path` across restarts, so neither an outage nor a crash loop can
+    become a stream of uploads.
+    """
 
     def __init__(self, build: Callable[[], dict], latest: Callable[[], int | None],
-                 deploy_command: str = "", out_dir: Path | None = None,
-                 refresh_seconds: float = 3600, clock: Callable[[], float] = time.monotonic):
+                 deploy: Callable[[], str | None] | None = None, *,
+                 refresh_seconds: float = 3600, deploy_seconds: float = 6 * 3600,
+                 retry_seconds: float = 1800, state_path: Path | None = None,
+                 clock: Callable[[], float] = time.time):
         self.build = build
         self.latest = latest
-        self.deploy_command = deploy_command
-        self.out_dir = out_dir
+        self.deploy = deploy
         self.refresh_seconds = refresh_seconds
+        self.deploy_seconds = deploy_seconds
+        self.retry_seconds = retry_seconds
+        self.state_path = state_path
         self.clock = clock
         self._lock = threading.Lock()
         self._running = False
         self._built_for: int | None = None
-        self._last_attempt: float | None = None
-        self.status: dict = {"built_at": None, "error": None, "running": False}
+        self._last_build: float | None = None
+        self._failed_at: float | None = None
+        self._deployed = self._load_state()
+        self.status: dict = {"built_at": None, "error": None, "running": False,
+                             "deployed_at": self._deployed.get("deployed_at"),
+                             "url": self._deployed.get("url")}
+
+    def _load_state(self) -> dict:
+        try:
+            state = json.loads(self.state_path.read_text()) if self.state_path else {}
+        except (OSError, ValueError):
+            return {}
+        return state if isinstance(state, dict) else {}
+
+    def _save_state(self) -> None:
+        if self.state_path:
+            _write_atomic(self.state_path, json.dumps(self._deployed).encode())
 
     def due(self) -> bool:
         if self._running:
             return False
-        if self._last_attempt is None or self.latest() != self._built_for:
+        now = self.clock()
+        if self._failed_at is not None and now - self._failed_at < self.retry_seconds:
+            return False
+        latest = self.latest()
+        if self._last_build is None or latest != self._built_for:
             return True
-        return self.clock() - self._last_attempt >= self.refresh_seconds
+        if self.deploy and latest != self._deployed.get("painting"):
+            return True                    # a painting still waiting for its upload
+        return now - self._last_build >= self.refresh_seconds
 
     def maybe_publish(self) -> bool:
-        return self.publish_now() if self.due() else False
+        return self.publish_now(force_deploy=False) if self.due() else False
 
-    def publish_now(self) -> bool:
+    def publish_now(self, force_deploy: bool = True) -> bool:
         with self._lock:
             if self._running:
                 return False
             self._running = True
             self.status["running"] = True
-        threading.Thread(target=self.run_once, name="birdframe-public-site", daemon=True).start()
+        threading.Thread(target=self.run_once, args=(force_deploy,),
+                         name="birdframe-public-site", daemon=True).start()
         return True
 
-    def run_once(self) -> dict:
+    def _upload_due(self, latest: int | None, fingerprint: str | None) -> bool:
+        last = self._deployed
+        if not last or latest != last.get("painting"):
+            return True
+        if fingerprint and fingerprint == last.get("fingerprint"):
+            return False
+        return self.clock() - float(last.get("at", 0)) >= self.deploy_seconds
+
+    def run_once(self, force_deploy: bool = False) -> dict:
         latest = self.latest()
         try:
             summary = self.build()
-            if self.deploy_command and self.out_dir:
-                deploy(self.out_dir, self.deploy_command)
             self._built_for = latest
             self.status.update(summary, built_at=datetime.now().isoformat(timespec="seconds"),
                                error=None)
+            fingerprint = summary.get("fingerprint")
+            if self.deploy and (force_deploy or self._upload_due(latest, fingerprint)):
+                url = self.deploy() or self._deployed.get("url")
+                self._deployed = {"painting": latest, "fingerprint": fingerprint,
+                                  "at": self.clock(), "url": url,
+                                  "deployed_at": datetime.now().isoformat(timespec="seconds")}
+                self._save_state()
+                self.status.update(url=url, deployed_at=self._deployed["deployed_at"])
+            self._failed_at = None
             return summary
         except Exception as exc:  # a failed build must never disturb listening
-            log.warning("Public site build failed: %s", exc)
+            log.warning("Public site publish failed: %s", exc)
             self.status["error"] = str(exc)
+            self._failed_at = self.clock()
             return {}
         finally:
-            self._last_attempt = self.clock()
+            self._last_build = self.clock()
             with self._lock:
                 self._running = False
                 self.status["running"] = False
-

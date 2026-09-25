@@ -145,14 +145,19 @@ function publicSiteCard(site) {
   if (!site?.enabled) {
     return `<section class="card card-pad" style="margin-top:18px"><div class="eyebrow">Public site</div>
       <h2 style="font:500 24px var(--serif)">Share the journal publicly</h2>
-      <p class="muted">birdframe can build a read-only site of your paintings and birds, without audio, coordinates or doubtful birds, for any static host. Add <code>public_site_dir = "~/Sites/birdframe"</code> to config.toml and restart, or run <code>birdframe publish ~/Sites/birdframe</code>.</p></section>`;
+      <p class="muted">birdframe can build a read-only site of your paintings and birds, without audio, coordinates or doubtful birds, for any static host. Add <code>public_site_dir = "~/Sites/birdframe"</code> to config.toml and restart, or run <code>birdframe publish ~/Sites/birdframe</code>. To host it free on Cloudflare Pages, add <code>cloudflare_project</code> and <code>cloudflare_account_id</code> and store a token with <code>birdframe set-key cloudflare</code>.</p></section>`;
   }
-  const built = site.built_at ? `Last built ${esc(site.built_at.replace('T', ' ').slice(0, 16))} · ${site.paintings ?? 0} paintings, ${site.species ?? 0} birds` : 'Not built yet';
+  const when = stamp => esc(stamp.replace('T', ' ').slice(0, 16));
+  const built = site.built_at ? `Last built ${when(site.built_at)} · ${site.paintings ?? 0} paintings, ${site.species ?? 0} birds` : 'Not built yet';
+  const sent = site.host ? (site.deployed_at ? ` · sent to ${esc(site.host)} ${when(site.deployed_at)}` : ` · not yet sent to ${esc(site.host)}`) : '';
+  const cadence = site.host
+    ? `Rebuilt after each new painting and hourly otherwise; sent to ${esc(site.host)} with each new painting, and every few hours when the birds have changed.`
+    : 'Rebuilt after each new painting and hourly otherwise.';
   return `<section class="card card-pad" style="margin-top:18px"><div class="section-head" style="margin-top:0"><div><div class="eyebrow">Public site</div>
-      <h2>The journal, shared read-only</h2><p>Rebuilt after each new painting and hourly otherwise.</p></div></div>
+      <h2>The journal, shared read-only</h2><p>${cadence}</p></div></div>
     <div class="button-row"><button type="button" class="btn secondary" id="publishSite">Publish now</button>
       ${site.url ? `<a class="btn secondary" href="${attr(site.url)}" target="_blank" rel="noopener">Open the public site ↗</a>` : ''}
-      <span class="section-note" id="publishMessage">${site.running ? 'Publishing…' : site.error ? `Last attempt failed: ${esc(site.error)}` : built}</span></div>
+      <span class="section-note" id="publishMessage">${site.running ? 'Publishing…' : site.error ? `Last attempt failed: ${esc(site.error)}` : built + sent}</span></div>
   </section>`;
 }
 

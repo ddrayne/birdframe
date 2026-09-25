@@ -1,9 +1,18 @@
 #!/bin/bash
-# Install birdframe as a macOS LaunchAgent so it runs at login and restarts on crash.
+# Install birdframe as a background service that restarts if it ever stops:
+# a LaunchAgent on macOS (runs at login), a systemd user service on Linux —
+# a Raspberry Pi — (runs at boot).
 set -euo pipefail
 
 WORKDIR="$(cd "$(dirname "$0")/.." && pwd)"
 UV="$(command -v uv || true)"
+
+if [ "$(uname -s)" = "Linux" ]; then
+  # On Linux (a Raspberry Pi) the one-line installer does it all: PortAudio,
+  # uv, dependencies, and a systemd user service that starts at boot.
+  exec "$WORKDIR/install.sh"
+fi
+
 if [ -z "$UV" ]; then
   echo "error: 'uv' not found on PATH. Install it first: brew install uv" >&2
   exit 1

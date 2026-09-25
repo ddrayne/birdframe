@@ -1,27 +1,42 @@
-"""Manage birdframe as a macOS background service (LaunchAgent), and build a
-double-clickable app — so running it forever is one command, not launchctl
-incantations.
+"""Run birdframe as a background service, so running it forever is one
+command rather than launchctl or systemctl incantations: a LaunchAgent (plus a
+double-clickable app) on macOS, a systemd user service on Linux — a
+Raspberry Pi — that starts at boot and comes back if it ever stops.
 """
 from __future__ import annotations
 
 import os
 import plistlib
 import shutil
+import socket
 import subprocess
 import tempfile
 import uuid
 from pathlib import Path
 
+from birdframe import host
+
+IS_MAC = host.IS_MAC
 LABEL = "com.birdframe"
 PLIST_PATH = Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
-LOG_PATH = Path.home() / "Library" / "Logs" / "birdframe.log"
+LOG_PATH = host.LOG_PATH
 REPO_ROOT = Path(__file__).resolve().parent.parent
 APP_PATH = Path.home() / "Applications" / "Birdframe.app"
 DASHBOARD_URL = "http://localhost:8355"
+UNIT_NAME = "birdframe.service"
+UNIT_PATH = (Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+             / "systemd" / "user" / UNIT_NAME)
 
 
 def _uv() -> str:
-    return shutil.which("uv") or "/opt/homebrew/bin/uv"
+    found = shutil.which("uv")
+    if found:
+        return found
+    for candidate in ("/opt/homebrew/bin/uv", Path.home() / ".local" / "bin" / "uv",
+                      Path.home() / ".cargo" / "bin" / "uv", "/usr/local/bin/uv"):
+        if Path(candidate).exists():
+            return str(candidate)
+    return "uv"
 
 
 def _domain() -> str:
@@ -46,6 +61,59 @@ def _plist_dict() -> dict:
 
 
 def install() -> str:
+    return _mac_install() if IS_MAC else _systemd_install()
+
+
+def uninstall() -> str:
+    return _mac_uninstall() if IS_MAC else _systemd_uninstall()
+
+
+def start() -> str:
+    return _mac_start() if IS_MAC else _systemd_start()
+
+
+def stop() -> str:
+    if IS_MAC:
+        _launchctl("bootout", _job(), check=False)
+    elif error := _systemctl("stop", UNIT_NAME):
+        return f"Could not stop it: {error}"
+    return "Stopped."
+
+
+def restart() -> str:
+    if IS_MAC:
+        _launchctl("kickstart", "-k", _job(), check=False)
+    elif error := _systemctl("restart", UNIT_NAME):
+        return f"Could not restart it: {error}"
+    return "Restarted."
+
+
+def is_running() -> bool:
+    if IS_MAC:
+        return LABEL in (_launchctl("list", capture=True) or "")
+    return (_systemctl("is-active", UNIT_NAME, capture=True) or "").strip() == "active"
+
+
+def status() -> str:
+    installed = (PLIST_PATH if IS_MAC else UNIT_PATH).exists()
+    running = is_running()
+    lines = [
+        f"  service installed : {'yes' if installed else 'no'}",
+        f"  running           : {'yes' if running else 'no'}",
+        f"  dashboard         : {DASHBOARD_URL}",
+    ]
+    if not IS_MAC:
+        lines.append(f"  on your network   : http://{socket.gethostname()}.local:8355")
+        if installed and not _lingering():
+            lines.append("  starts at boot    : no — run: sudo loginctl enable-linger $USER")
+    lines.append(f"  logs              : {LOG_PATH}")
+    if not installed:
+        when = "at login" if IS_MAC else "at boot"
+        lines.append(f"\n  run 'birdframe install' to run it in the background {when}")
+    return "birdframe service\n" + "\n".join(lines)
+
+
+def _mac_install() -> str:
     # Keep the friendly launcher in sync with the installed service.
     make_app()
     PLIST_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -58,47 +126,18 @@ def install() -> str:
     return f"Installed and started. Logs: {LOG_PATH}\nDashboard: {DASHBOARD_URL}"
 
 
-def uninstall() -> str:
+def _mac_uninstall() -> str:
     _launchctl("bootout", _job(), check=False)
     if PLIST_PATH.exists():
         PLIST_PATH.unlink()
     return "birdframe service removed (your data and settings are untouched)."
 
 
-def start() -> str:
+def _mac_start() -> str:
     if not PLIST_PATH.exists():
         return install()
     _launchctl("bootstrap", _domain(), str(PLIST_PATH), check=False)
     return "Started."
-
-
-def stop() -> str:
-    _launchctl("bootout", _job(), check=False)
-    return "Stopped."
-
-
-def restart() -> str:
-    _launchctl("kickstart", "-k", _job(), check=False)
-    return "Restarted."
-
-
-def is_running() -> bool:
-    out = _launchctl("list", capture=True) or ""
-    return LABEL in out
-
-
-def status() -> str:
-    installed = PLIST_PATH.exists()
-    running = is_running()
-    lines = [
-        f"  service installed : {'yes' if installed else 'no'}",
-        f"  running           : {'yes' if running else 'no'}",
-        f"  dashboard         : {DASHBOARD_URL}",
-        f"  logs              : {LOG_PATH}",
-    ]
-    if not installed:
-        lines.append("\n  run 'birdframe install' to run it in the background at login")
-    return "birdframe service\n" + "\n".join(lines)
 
 
 def _launchctl(*args, check=True, capture=False):
@@ -107,6 +146,108 @@ def _launchctl(*args, check=True, capture=False):
         return r.stdout if capture else None
     except Exception:
         return None
+
+
+# --------------------------------------------------------------------------
+# Linux: a systemd user service
+# --------------------------------------------------------------------------
+def _unit_escape(value: str) -> str:
+    """Escape systemd's specifier character in a unit-file value."""
+    return str(value).replace("%", "%%")
+
+
+def _unit_quote(value: str, command: bool = False) -> str:
+    """One double-quoted word for Environment= or (command=True) ExecStart=,
+    where "$" would otherwise start a variable."""
+    escaped = _unit_escape(value).replace("\\", "\\\\").replace('"', '\\"')
+    return '"' + (escaped.replace("$", "$$") if command else escaped) + '"'
+
+
+def _unit_text() -> str:
+    log = _unit_escape(LOG_PATH)
+    path = os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")
+    return f"""\
+[Unit]
+Description=birdframe: listens to the birds and paints the day
+# However often it stops, bring it back (like launchd's KeepAlive).
+StartLimitIntervalSec=0
+
+[Service]
+WorkingDirectory={_unit_escape(REPO_ROOT)}
+ExecStart={_unit_quote(_uv(), command=True)} run birdframe
+Environment={_unit_quote("PATH=" + path)}
+Restart=always
+RestartSec=10
+# Time to let go of the microphone before being stopped the hard way.
+TimeoutStopSec=15
+StandardOutput=append:{log}
+StandardError=append:{log}
+
+[Install]
+WantedBy=default.target
+"""
+
+
+def _systemctl(*args, capture=False):
+    """Run `systemctl --user`; the output if `capture`, else an error message
+    ("" when it worked)."""
+    try:
+        r = subprocess.run(["systemctl", "--user", *args], check=False,
+                           capture_output=True, text=True, timeout=60)
+    except Exception as exc:
+        return "" if capture else str(exc)
+    if capture:
+        return r.stdout
+    return "" if r.returncode == 0 else (r.stderr.strip() or f"exit status {r.returncode}")
+
+
+def _lingering() -> bool:
+    """A user service starts at boot only if the user 'lingers'; otherwise it
+    waits for a login and stops at logout."""
+    try:
+        r = subprocess.run(["loginctl", "show-user", os.environ.get("USER", ""),
+                            "--property=Linger"], capture_output=True, text=True, timeout=10)
+        return r.stdout.strip() == "Linger=yes"
+    except Exception:
+        return False
+
+
+def _systemd_install() -> str:
+    UNIT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    UNIT_PATH.write_text(_unit_text())
+    error = (_systemctl("daemon-reload") or _systemctl("enable", UNIT_NAME)
+             or _systemctl("restart", UNIT_NAME))  # restart: start, or pick up a changed unit
+    if error:
+        return (f"Wrote {UNIT_PATH}, but systemd could not start it: {error}\n"
+                "Is this a systemd system, and are you logged in as the user who will run it?")
+    lines = [f"Installed and started ({UNIT_PATH}).", f"Logs: {LOG_PATH}",
+             f"Dashboard: http://{socket.gethostname()}.local:8355"]
+    if not _lingering():
+        try:
+            subprocess.run(["loginctl", "enable-linger"], capture_output=True, timeout=30)
+        except Exception:
+            pass
+        if not _lingering():
+            lines.append("To start at boot without logging in, run once:  "
+                         "sudo loginctl enable-linger $USER")
+    return "\n".join(lines)
+
+
+def _systemd_uninstall() -> str:
+    _systemctl("disable", "--now", UNIT_NAME)
+    if UNIT_PATH.exists():
+        UNIT_PATH.unlink()
+    _systemctl("daemon-reload")
+    return "birdframe service removed (your data and settings are untouched)."
+
+
+def _systemd_start() -> str:
+    if not UNIT_PATH.exists():
+        return install()
+    if error := _systemctl("start", UNIT_NAME):
+        return f"Could not start it: {error}"
+    return "Started."
 
 
 # --------------------------------------------------------------------------
@@ -217,6 +358,9 @@ def _replace_bundle(built_app: Path) -> None:
 def make_app() -> str:
     """Create ~/Applications/Birdframe.app — opening it ensures the service is
     running and opens the dashboard. A friendly, Spotlight-able launcher."""
+    if not IS_MAC:
+        return ("make-app builds a macOS app. Here, open the dashboard at "
+                f"http://{socket.gethostname()}.local:8355 and add it to your home screen.")
     APP_PATH.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
             prefix=".birdframe-build-", dir=APP_PATH.parent) as tmp:

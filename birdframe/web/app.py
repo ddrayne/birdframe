@@ -678,8 +678,11 @@ def create_app(ctx: AppContext) -> FastAPI:
         site = ctx.public_site
         if site is None:
             return {"enabled": False}
-        return {"enabled": True, "url": getattr(ctx.config, "public_site_url", "") or None,
-                **site.status}
+        config = ctx.config
+        host = ("your deploy command" if getattr(config, "public_deploy_command", "")
+                else "Cloudflare Pages" if getattr(config, "cloudflare_project", "") else None)
+        return {**site.status, "enabled": True, "host": host,
+                "url": getattr(config, "public_site_url", "") or site.status.get("url")}
 
     @app.get("/api/public")
     def public_site_status():
@@ -690,7 +693,8 @@ def create_app(ctx: AppContext) -> FastAPI:
         """Rebuild the public site now, in the background. Where it's built and
         how it's deployed come only from config.toml, never from a request."""
         if ctx.public_site is None:
-            return JSONResponse({"error": "set public_site_dir in config.toml to publish a public site"},
+            return JSONResponse({"error": "set public_site_dir or cloudflare_project in "
+                                          "config.toml to publish a public site"},
                                 status_code=400)
         started = ctx.public_site.publish_now()
         return {"status": "started" if started else "running"}
