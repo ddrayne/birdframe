@@ -1,6 +1,6 @@
 import {
   api, cachedApi, app, attr, esc, num, percent, dateLabel, hourLabel, speciesHref,
-  tierBadge, playButton, pageHeader, routeIsCurrent,
+  tierBadge, playButton, pageHeader, routeIsCurrent, artImg, artLightbox,
 } from '../core.js';
 import {areaChart, confidenceBars, hourBars} from '../charts.js';
 import {clipCards, reliabilityLegend, stats} from '../components.js';
@@ -119,8 +119,8 @@ function companions(d) {
 function artworks(d) {
   if (!d.images.length) return '';
   return `<section><div class="section-head"><div><div class="eyebrow">In the picture archive</div><h2>Artwork appearances</h2><p>Pictures whose stored roll call includes ${esc(d.common_name)}.</p></div></div>
-    <div class="art-strip">${d.images.map(image => `<button type="button" class="art-tile image-button" style="border:0;background:none;padding:0;text-align:left" data-lightbox="/api/image/${image.id}" data-alt="${attr(image.style)} artwork" data-caption="${attr(image.generated_at.slice(0, 10) + ' · ' + image.style)}">
-      <img loading="lazy" src="/api/image/${image.id}" alt="${attr(image.style)} artwork"><small>${esc(image.generated_at.slice(0, 10))} · ${esc(image.style)}</small></button>`).join('')}</div></section>`;
+    <div class="art-strip">${d.images.map(image => `<button type="button" class="art-tile image-button" style="border:0;background:none;padding:0;text-align:left" data-lightbox="${artLightbox(image.id)}" data-alt="${attr(image.style)} artwork" data-caption="${attr(image.generated_at.slice(0, 10) + ' · ' + image.style)}">
+      ${artImg(image.id, 240, `${image.style} artwork`)}<small>${esc(image.generated_at.slice(0, 10))} · ${esc(image.style)}</small></button>`).join('')}</div></section>`;
 }
 
 async function renderDossier(token, name, days) {

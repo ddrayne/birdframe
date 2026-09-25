@@ -1,6 +1,6 @@
 import {
   api, app, attr, esc, num, dateLabel, relativeDay, pageHeader, routeIsCurrent,
-  tierBadge, speciesHref,
+  tierBadge, speciesHref, artImg, artLightbox,
 } from '../core.js';
 import {activityRibbon, hourBars} from '../charts.js';
 import {clipCards, speciesRows, stats, reliabilityLegend} from '../components.js';
@@ -8,15 +8,19 @@ import {clipCards, speciesRows, stats, reliabilityLegend} from '../components.js
 function dayCard(day) {
   const art = day.images?.[0];
   const reliable = day.top_species.filter(s => s.tier !== 'tentative');
+  // The card already shows the date; the eyebrow adds the day of the week.
+  const relative = relativeDay(day.day);
+  const eyebrow = ['Today', 'Yesterday'].includes(relative) ? relative
+    : new Intl.DateTimeFormat('en-GB', {weekday: 'long'}).format(new Date(`${day.day}T12:00:00`));
   return `<a class="day-card card" href="#journal/${esc(day.day)}">
     <div class="day-card-body">
-      <div class="eyebrow">${esc(relativeDay(day.day))}</div>
+      <div class="eyebrow">${esc(eyebrow)}</div>
       <time datetime="${esc(day.day)}">${esc(dateLabel(day.day, 'short'))}</time>
       <div class="day-stats"><span>${day.species} species</span><span>${num(day.detections)} detections</span><span>${day.images.length} pictures</span></div>
       <div class="day-species">${reliable.slice(0, 4).map(s => `<span>${esc(s.common_name)}</span>`).join('')}
         ${day.new_species.length ? `<span style="color:var(--gold)">+${day.new_species.length} new</span>` : ''}</div>
     </div>
-    ${art ? `<img class="day-art" loading="lazy" src="/api/image/${art.id}" alt="${attr(art.style)} artwork from ${attr(day.day)}">`
+    ${art ? artImg(art.id, 240, `${art.style} artwork from ${day.day}`, 'day-art')
       : '<div class="day-art day-art-placeholder" aria-hidden="true">♧</div>'}
   </a>`;
 }
@@ -33,12 +37,8 @@ function dayStory(day) {
 
 async function renderDay(token, dayName) {
   const day = await api(`/api/day/${dayName}`);
-  const journal = await api('/api/journal?limit=366');
   if (!routeIsCurrent(token)) return;
-  const days = journal.days.map(item => item.day);
-  const index = days.indexOf(dayName);
-  const newer = index > 0 ? days[index - 1] : null;
-  const older = index >= 0 && index < days.length - 1 ? days[index + 1] : null;
+  const {older, newer} = day;
   const artwork = day.images?.[0];
   const reliable = day.species.filter(s => s.tier !== 'tentative');
 
@@ -54,7 +54,7 @@ async function renderDay(token, dayName) {
           ${newer ? `<a class="btn secondary" href="#journal/${newer}">Newer day →</a>` : ''}
         </div>
       </div>
-      ${artwork ? `<button type="button" class="image-button" style="border:0;padding:0;background:none" data-lightbox="/api/image/${artwork.id}" data-alt="Artwork from ${attr(day.date)}" data-caption="${attr(dateLabel(day.date) + ' · ' + artwork.style)}"><img class="day-artwork" src="/api/image/${artwork.id}" alt="Artwork from ${attr(day.date)}"></button>`
+      ${artwork ? `<button type="button" class="image-button" style="border:0;padding:0;background:none" data-lightbox="${artLightbox(artwork.id)}" data-alt="Artwork from ${attr(day.date)}" data-caption="${attr(dateLabel(day.date) + ' · ' + artwork.style)}">${artImg(artwork.id, 480, `Artwork from ${day.date}`, 'day-artwork')}</button>`
         : '<div class="day-artwork day-art-placeholder" aria-hidden="true">♧</div>'}
     </section>
 
@@ -66,8 +66,8 @@ async function renderDay(token, dayName) {
     ])}</div>
 
     <div class="grid-2" style="margin-top:18px">
-      <section class="card dossier-section"><h2>The day’s pulse</h2><p>Hover any 15-minute moment to see its voices and exact counts.</p>${activityRibbon(day.quarters, 'Bird activity through the day', day.quarter_species)}</section>
-      <section class="card dossier-section"><h2>The daily rhythm</h2><p>Hover an hour to see which species made up the chorus.</p>${hourBars(day.hours, {height: 180, speciesByHour: day.hour_species})}</section>
+      <section class="card dossier-section"><h2>The day’s pulse</h2><p>Touch or hover any 15-minute moment to see its voices and exact counts.</p>${activityRibbon(day.quarters, 'Bird activity through the day', day.quarter_species)}</section>
+      <section class="card dossier-section"><h2>The daily rhythm</h2><p>Touch or hover an hour to see which species made up the chorus.</p>${hourBars(day.hours, {height: 180, speciesByHour: day.hour_species})}</section>
     </div>
 
     <section>

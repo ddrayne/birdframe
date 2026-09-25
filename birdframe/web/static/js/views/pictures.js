@@ -1,6 +1,6 @@
 import {
   api, app, attr, esc, formBody, num, pageHeader, dateLabel, routeIsCurrent,
-  sendImageToFrame, toast,
+  sendImageToFrame, toast, artImg, artLightbox,
 } from '../core.js';
 import {hourBars, initChartTooltips} from '../charts.js';
 
@@ -28,8 +28,8 @@ function editionCard(image, styleMap) {
   const profile = image.art_profile;
   const caption = `${dateLabel(day)} · ${image.style} · ${species}`;
   return `<article class="edition-card card">
-    <button type="button" class="image-button edition-image" data-lightbox="/api/image/${image.id}" data-alt="${attr(image.style)} birdframe artwork" data-caption="${attr(caption)}">
-      <img loading="lazy" src="/api/image/${image.id}" alt="${attr(image.style)} birdframe artwork">
+    <button type="button" class="image-button edition-image" data-lightbox="${artLightbox(image.id)}" data-alt="${attr(image.style)} birdframe artwork" data-caption="${attr(caption)}">
+      ${artImg(image.id, 480, `${image.style} birdframe artwork`)}
       ${image.on_frame ? '<span class="edition-frame-mark">On the frame</span>' : ''}
     </button>
     <div class="edition-copy">
@@ -153,7 +153,7 @@ async function renderReimagine(token, params) {
         <p id="selectedStyleStory"></p></div>
       <label>Chosen style<select id="reimagineStyle">${styleOptions(library.styles)}</select></label>
       <div class="button-row"><button type="button" class="btn" id="makePicture" ${library.key_set ? '' : 'disabled'}>Create this edition</button>
-        <span class="section-note" id="makeStatus">${library.key_set ? 'A high-quality image usually takes around two minutes and uses one image generation.' : 'Set an OpenAI key to use image generation.'}</span></div>
+        <span class="section-note" id="makeStatus">${library.key_set ? 'A high-quality image usually takes around two minutes and uses one image generation.' : 'Set a key for your image provider (birdframe set-key) to use image generation.'}</span></div>
       <div id="makePreview"></div>
     </section>`);
 
@@ -168,7 +168,7 @@ async function renderReimagine(token, params) {
     host.innerHTML = '<div class="loading-inline">Reading the character of this day…</div>';
     direction = await api(`/api/art-direction/${day}`);
     if (!routeIsCurrent(token)) return;
-    const existing = direction.editions.length ? `<div class="existing-editions"><div class="eyebrow">Already imagined</div><div>${direction.editions.map(image => `<button type="button" data-lightbox="/api/image/${image.id}" data-caption="${attr(image.style)}"><img src="/api/image/${image.id}" alt="${attr(image.style)} edition"></button>`).join('')}</div></div>` : '';
+    const existing = direction.editions.length ? `<div class="existing-editions"><div class="eyebrow">Already imagined</div><div>${direction.editions.map(image => `<button type="button" data-lightbox="${artLightbox(image.id)}" data-caption="${attr(image.style)}">${artImg(image.id, 240, `${image.style} edition`)}</button>`).join('')}</div></div>` : '';
     host.innerHTML = `${fingerprint(direction)}
       <section class="recommendations"><div class="section-head"><div><div class="eyebrow">The art director’s shortlist</div><h2>Three ways into the day</h2><p>Recommendations are deterministic: revisit this date and its fit stays the same.</p></div></div>
         <div class="recommendation-grid">${recommendationCards(direction, stylesByName)}</div></section>${existing}`;
@@ -204,7 +204,7 @@ async function renderReimagine(token, params) {
         clearInterval(poll); button.disabled = false;
         if (job.state === 'done') {
           status.textContent = 'Your new edition is ready.';
-          document.querySelector('#makePreview').innerHTML = `<div class="new-edition"><button type="button" class="image-button" data-lightbox="/api/image/${job.image_id}" data-caption="New ${attr(style)} edition"><img src="/api/image/${job.image_id}" alt="New ${attr(style)} edition"></button><div><div class="eyebrow">Fresh from the studio</div><h3>${esc(nice(style))}</h3><p><a href="#pictures/editions">See it in Editions →</a></p></div></div>`;
+          document.querySelector('#makePreview').innerHTML = `<div class="new-edition"><button type="button" class="image-button" data-lightbox="${artLightbox(job.image_id)}" data-caption="New ${attr(style)} edition">${artImg(job.image_id, 240, `New ${style} edition`)}</button><div><div class="eyebrow">Fresh from the studio</div><h3>${esc(nice(style))}</h3><p><a href="#pictures/editions">See it in Editions →</a></p></div></div>`;
         } else status.textContent = job.state === 'empty' ? 'No well-supported species are available to picture on this day.' : `Could not generate: ${job.result || job.state}`;
       }, 1800);
     } catch (error) { button.disabled = false; status.textContent = error.message; }
@@ -258,7 +258,7 @@ async function renderLibrary(token) {
         ${data.mode === 'pinned' ? '<button class="active" disabled>House style</button>' : ''}
       </div><small>${data.mode === 'pinned' ? 'One direction is pinned below.' : data.mode === 'responsive' ? 'The day and the style meet each other.' : 'Styles take a simple daily turn.'}</small></div>
     </section>
-    <section class="library-head"><div><div class="eyebrow">Twenty-one ways of seeing</div><h2>The collection</h2><p>Historic lineages and contemporary data portraits, all grounded in the birds actually heard here.</p></div><button type="button" class="btn" id="newStyle">Create a direction</button></section>
+    <section class="library-head"><div><div class="eyebrow">${num(data.styles.length)} ways of seeing</div><h2>The collection</h2><p>Historic lineages and contemporary data portraits, all grounded in the birds actually heard here.</p></div><button type="button" class="btn" id="newStyle">Create a direction</button></section>
     <div class="filter-bar library-filters"><label class="search"><input id="styleSearch" placeholder="Search lineage, medium, or feeling…" aria-label="Search styles"></label>
       <select id="collectionFilter"><option value="">Every collection</option>${collections.map(value => `<option>${esc(value)}</option>`).join('')}</select><span class="section-note" id="styleResult"></span></div>
     <div class="library-grid" id="styleGrid">${data.styles.map(styleCard).join('')}</div>

@@ -196,7 +196,7 @@ select { cursor: pointer; }
 .stat b { font: 500 31px/1 var(--serif); color: var(--forest); font-variant-numeric: tabular-nums; }
 .stat span { color: var(--ink-soft); font-size: 11px; text-transform: uppercase; letter-spacing: .09em; }
 
-.chart { width: 100%; min-height: 150px; position: relative; }
+.chart { width: 100%; position: relative; }
 .chart svg { display: block; width: 100%; height: auto; overflow: visible; }
 .chart text { fill: var(--ink-faint); font: 10px var(--sans); }
 .chart .grid { stroke: var(--line); stroke-width: 1; }
@@ -497,7 +497,7 @@ select { cursor: pointer; }
 .audio-progress { height: 3px; border-radius: 3px; background: color-mix(in srgb, white 18%, transparent); overflow: hidden; }
 .audio-progress i { display: block; height: 100%; width: 0; background: var(--gold); }
 .lightbox { position: fixed; inset: 0; z-index: 100; background: rgb(5 8 6 / 92%); backdrop-filter: blur(8px); display: grid; place-items: center; padding: 38px; }
-.lightbox img { max-height: 82vh; max-width: min(720px,86vw); border-radius: 12px; box-shadow: 0 24px 80px rgb(0 0 0 / 60%); }
+.lightbox img { max-height: 82vh; max-height: 82dvh; max-width: min(720px,86vw); border-radius: 12px; box-shadow: 0 24px 80px rgb(0 0 0 / 60%); }
 .lightbox > div { position: fixed; bottom: calc(18px + env(safe-area-inset-bottom)); left: 20px; right: 20px; color: white; text-align: center; }
 .lightbox-send { display: block; margin: 12px auto 0; padding: 8px 18px; border-radius: 999px; border: 1px solid rgb(255 255 255 / 30%); background: rgb(255 255 255 / 10%); color: white; cursor: pointer; }
 .lightbox-send:disabled { opacity: .6; cursor: default; }
@@ -527,9 +527,15 @@ select { cursor: pointer; }
   .header-tools { min-width: 0; }
   #app { padding: 24px 16px 56px; }
   .mobile-nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 70; display: grid; grid-template-columns: repeat(5,1fr); padding: 7px max(7px, env(safe-area-inset-right)) calc(7px + env(safe-area-inset-bottom)) max(7px, env(safe-area-inset-left)); border-top: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 93%, transparent); backdrop-filter: blur(18px); }
-  .mobile-nav a { display: grid; justify-items: center; gap: 2px; padding: 3px 0; color: var(--ink-faint); font-size: 9px; font-weight: 650; }
-  .mobile-nav a span { font-size: 17px; line-height: 1; }
+  .mobile-nav a { display: grid; justify-items: center; gap: 3px; padding: 2px 0; color: var(--ink-faint); font-size: 10.5px; font-weight: 650; }
+  .mobile-nav .nav-icon { display: grid; place-items: center; width: 52px; height: 28px; border-radius: 999px; transition: background-color .15s ease; }
+  .mobile-nav svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
   .mobile-nav a.active { color: var(--forest); }
+  .mobile-nav a.active .nav-icon { background: var(--forest-soft); }
+  /* iOS Safari zooms the whole page into any focused field smaller than 16px. */
+  input, select, textarea { font-size: 16px; }
+  /* Charts use a narrower drawing on phones; keep their labels legible. */
+  .chart text { font-size: 12.5px; }
   .page-head { align-items: start; flex-direction: column; }
   .page-head h1 { font-size: 44px; }
   .grid-main, .grid-2, .grid-3, .dossier-grid, .settings-groups { grid-template-columns: 1fr; }
@@ -590,6 +596,14 @@ select { cursor: pointer; }
   .new-edition img { width: 100px; }
   .clip-grid { grid-template-columns: 1fr; }
   .lightbox { padding: 14px; }
+  .lightbox img { max-width: 94vw; }
+}
+
+/* Touch screens have no hover: a tapped card shouldn't stay lifted. */
+@media (hover: none) {
+  .btn:hover:not(:disabled), .day-card:hover, .species-card:hover,
+  .recommendation:hover, .library-card:hover,
+  .edition-card:hover .edition-image img, .library-card:hover .library-visual img { transform: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

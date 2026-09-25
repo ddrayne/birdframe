@@ -4,7 +4,19 @@ export const state = {
   routeToken: 0,
   caches: new Map(),
   todayTimer: null,
+  poll: null,
 };
+
+// Archived pictures are 3 MB, 1200×1600 PNGs; every list asks the server for a
+// cached JPEG sized to its slot (CSS px), with a 2× variant for retina screens.
+export function artImg(id, cssWidth, alt, className = '') {
+  const src = `/api/image/${id}?w=${cssWidth}`;
+  return `<img ${className ? `class="${attr(className)}" ` : ''}loading="lazy" decoding="async" src="${src}"
+    srcset="${src} 1x, /api/image/${id}?w=${cssWidth * 2} 2x" alt="${attr(alt)}">`;
+}
+
+// The lightbox shows a large JPEG rather than the multi-megabyte original.
+export const artLightbox = id => `/api/image/${id}?w=1200`;
 
 export async function api(path, options = {}) {
   const response = await fetch(path, options);
@@ -208,7 +220,7 @@ export function openLightbox(src, caption, imageAlt = '') {
   document.querySelector('#lightboxCaption').innerHTML = caption;
   // Any archived image can go to the frame straight from the viewer.
   const send = document.querySelector('#lightboxSend');
-  const archived = /^\/api\/image\/(\d+)$/.exec(src);
+  const archived = /^\/api\/image\/(\d+)(?:\?|$)/.exec(src);
   send.hidden = !archived;
   if (archived) send.dataset.sendImage = archived[1];
   box.hidden = false;
@@ -234,10 +246,24 @@ export function initLightbox() {
   document.addEventListener('keydown', event => { if (event.key === 'Escape') closeLightbox(); });
 }
 
+// Live views refresh only while the page is visible: a backgrounded phone tab
+// shouldn't keep waking the radio, or the Mac's database, every few seconds.
+export function startPolling(refresh, ms) {
+  stopPolling();
+  state.poll = refresh;
+  state.todayTimer = setInterval(() => { if (!document.hidden) refresh(); }, ms);
+}
+
 export function stopPolling() {
   if (state.todayTimer) clearInterval(state.todayTimer);
   state.todayTimer = null;
+  state.poll = null;
 }
+
+// Catch up the moment the page comes back to the foreground.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && state.poll) state.poll();
+});
 
 export function routeIsCurrent(token) { return token === state.routeToken; }
 

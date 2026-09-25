@@ -46,6 +46,10 @@ export function initChartTooltips(root = document) {
   });
 }
 
+// Phones get a narrower drawing, so bars and axis labels keep readable
+// proportions instead of a 720-unit sketch shrunk to under half size.
+const chartWidth = () => (window.matchMedia('(max-width: 760px)').matches ? 400 : 720);
+
 function points(values, width, height, inset = {l: 34, r: 10, t: 14, b: 25}) {
   const max = Math.max(1, ...values);
   const innerW = width - inset.l - inset.r;
@@ -71,7 +75,7 @@ export function miniSpark(values, label = 'Activity') {
 
 export function areaChart(rows, valueKey = 'detections', {height = 220, label = 'Detections by day'} = {}) {
   if (!rows?.length) return '<div class="empty">No activity in this range.</div>';
-  const width = 720;
+  const width = chartWidth();
   const values = rows.map(row => Number(row[valueKey] || 0));
   const pts = points(values, width, height);
   const max = Math.max(1, ...values);
@@ -85,7 +89,9 @@ export function areaChart(rows, valueKey = 'detections', {height = 220, label = 
   }).join('');
   const dots = pts.map((p, i) => `<circle cx="${p.x}" cy="${p.y}" r="3.3" fill="var(--forest)">
     <title>${esc(dateLabel(rows[i].day, 'short'))}: ${num(p.value)} ${esc(valueKey)}</title></circle>`).join('');
-  const labels = rows.map((row, i) => i % labelEvery === 0 || i === rows.length - 1
+  const last = rows.length - 1;
+  // Regular ticks, plus the final day — unless a tick already sits beside it.
+  const labels = rows.map((row, i) => (i % labelEvery === 0 && (i === last || last - i >= labelEvery / 2)) || i === last
     ? `<text x="${pts[i].x}" y="${height - 7}" text-anchor="middle">${esc(row.day.slice(5))}</text>` : '').join('');
   return `<div class="chart" role="img" aria-label="${esc(label)}"><svg viewBox="0 0 ${width} ${height}">
     ${yTicks}<path class="area" d="${area}"></path><path class="line" d="${path}"></path>${dots}${labels}
@@ -93,12 +99,12 @@ export function areaChart(rows, valueKey = 'detections', {height = 220, label = 
 }
 
 export function hourBars(hours, {height = 210, label = 'Detections around the 24-hour clock', speciesByHour = null} = {}) {
-  const width = 720, left = 30, right = 8, top = 14, bottom = 28;
+  const width = chartWidth(), left = 30, right = 8, top = 14, bottom = 28;
   const values = hours || Array(24).fill(0);
   const max = Math.max(1, ...values);
   const innerW = width - left - right;
   const innerH = height - top - bottom;
-  const gap = 4;
+  const gap = width < 720 ? 2 : 4;
   const barW = (innerW - gap * 23) / 24;
   const peak = values.indexOf(Math.max(...values));
   const bars = values.map((value, hour) => {
@@ -117,7 +123,7 @@ export function hourBars(hours, {height = 210, label = 'Detections around the 24
 
 export function activityRibbon(quarters, label = 'Bird activity through the day', speciesByQuarter = null) {
   const values = quarters || Array(96).fill(0);
-  const width = 720, height = 135, left = 30, right = 8, top = 12, bottom = 25;
+  const width = chartWidth(), height = 135, left = 30, right = 8, top = 12, bottom = 25;
   const max = Math.max(1, ...values);
   const barW = (width - left - right) / values.length;
   const bars = values.map((value, i) => {
@@ -176,8 +182,17 @@ export function confidenceBars(values) {
 
 export function dailySpeciesBars(rows) {
   if (!rows?.length) return '';
+  // Drawn in SVG so bars always share the width: fixed CSS-grid gaps
+  // outgrew a phone card after ~60 days and left every bar zero-wide.
+  const width = chartWidth(), height = 130, top = 8;
   const max = Math.max(1, ...rows.map(row => row.species || 0));
-  return `<div class="confidence-bars" style="grid-template-columns:repeat(${rows.length},1fr)" role="img" aria-label="Species richness by day">
-    ${rows.map(row => `<i style="height:${Math.max(2, row.species / max * 100)}%"><title>${esc(dateLabel(row.day, 'short'))}: ${row.species} species</title></i>`).join('')}
-  </div><div class="chart-caption"><span>${esc(rows[0].day.slice(5))}</span><span>species per day</span><span>${esc(rows.at(-1).day.slice(5))}</span></div>`;
+  const slot = width / rows.length;
+  const bars = rows.map((row, i) => {
+    const h = Math.max(2, (row.species || 0) / max * (height - top));
+    const detail = `${dateLabel(row.day, 'short')} · ${num(row.species)} species`;
+    return `<rect class="bar" x="${(i * slot).toFixed(2)}" y="${(height - h).toFixed(2)}" width="${Math.max(.8, slot * .74).toFixed(2)}" height="${h.toFixed(2)}" rx="1" ${tipTarget(detail)}>
+      <title>${esc(detail)}</title></rect>`;
+  }).join('');
+  return `<div class="chart interactive-chart" role="img" aria-label="Species richness by day"><svg viewBox="0 0 ${width} ${height}">${bars}</svg><div class="chart-tooltip" aria-hidden="true"></div></div>
+    <div class="chart-caption"><span>${esc(rows[0].day.slice(5))}</span><span>species per day</span><span>${esc(rows.at(-1).day.slice(5))}</span></div>`;
 }

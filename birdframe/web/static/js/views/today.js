@@ -1,6 +1,6 @@
 import {
   api, app, esc, num, percent, ago, dateLabel, speciesHref, tierBadge, playButton,
-  pageHeader, setListening, state, stopPolling, toast, routeIsCurrent,
+  pageHeader, setListening, startPolling, stopPolling, toast, routeIsCurrent,
 } from '../core.js';
 import {activityRibbon, miniSpark} from '../charts.js';
 import {speciesRows, stats, reliabilityLegend} from '../components.js';
@@ -22,15 +22,15 @@ function newestChips(names) {
 function todayHero(now) {
   const latest = now.latest;
   if (!latest) {
-    return `<section class="today-hero card">
+    return `<section class="today-hero card" id="todayHero" data-latest="">
       <div><div class="eyebrow gold">Listening live</div><h2 class="latest-name">A quiet window</h2>
       <p class="scientific">The next voice will appear here.</p></div>
       ${miniSpark(now.activity, 'Song activity in the last hour')}
     </section>`;
   }
-  return `<section class="today-hero card">
+  return `<section class="today-hero card" id="todayHero" data-latest="${latest.id}">
     <div>
-      <div class="eyebrow gold">Latest from the window · ${ago(latest.seconds_ago)}</div>
+      <div class="eyebrow gold">Latest from the window · <span data-hero-ago>${ago(latest.seconds_ago)}</span></div>
       <h2 class="latest-name"><a href="${speciesHref(latest.common_name)}">${esc(latest.common_name)}</a></h2>
       <div class="scientific">${esc(latest.scientific_name)}</div>
       <div class="hero-meta">
@@ -58,6 +58,11 @@ function fieldMoments(day, today) {
 async function refreshLive() {
   try {
     const now = await api('/api/now');
+    // The hero is the page's centrepiece: redraw it when a new bird arrives,
+    // otherwise just keep its "heard … ago" honest.
+    const hero = document.querySelector('#todayHero');
+    if (hero && hero.dataset.latest !== String(now.latest?.id ?? '')) hero.outerHTML = todayHero(now);
+    else if (hero && now.latest) hero.querySelector('[data-hero-ago]').textContent = ago(now.latest.seconds_ago);
     const latest = document.querySelector('[data-live-latest]');
     if (latest && now.latest) latest.textContent = `${now.latest.common_name} · ${ago(now.latest.seconds_ago)}`;
     const feed = document.querySelector('#liveFeed');
@@ -177,5 +182,5 @@ export async function renderToday(token) {
     speciesHost.innerHTML = speciesRows(filtered, {showReasons: true});
   });
   document.querySelector('[data-action="capture-moment"]')?.addEventListener('click', event => captureMoment(event.currentTarget));
-  state.todayTimer = setInterval(refreshLive, 5000);
+  startPolling(refreshLive, 5000);
 }
