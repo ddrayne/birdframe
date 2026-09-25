@@ -63,6 +63,16 @@ def fallback_poster(date: datetime, species: list[str], label: str = "") -> byte
     return out.getvalue()
 
 
+def thumbnail_jpeg(image_bytes: bytes, width: int) -> bytes:
+    """A small JPEG of a frame picture for galleries — a phone showing a card
+    105px wide shouldn't download and decode a 3 MB, 1200×1600 PNG."""
+    img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    img.thumbnail((width, width * 4), Image.LANCZOS)
+    out = io.BytesIO()
+    img.save(out, format="JPEG", quality=82, optimize=True, progressive=True)
+    return out.getvalue()
+
+
 def _date_str(date: datetime) -> str:
     # %-d is platform-specific; build the day number without a leading zero by hand.
     return date.strftime(f"%A {date.day} %B %Y")

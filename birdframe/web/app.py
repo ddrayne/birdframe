@@ -1,8 +1,11 @@
 """Local dashboard: JSON API + a single-page UI."""
 from __future__ import annotations
 
+import os
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from functools import lru_cache
 from pathlib import Path
 from typing import Callable
 from urllib.parse import quote
@@ -12,6 +15,11 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 STATIC = Path(__file__).resolve().parent / "static"
+
+# Gallery thumbnails are cut at a few fixed widths and cached beside the archive.
+THUMB_WIDTHS = (240, 480, 960, 1200)
+# An archived picture never changes under its id, so browsers may keep it a day.
+IMAGE_CACHE = {"Cache-Control": "public, max-age=86400"}
 
 # Settings exposed in the dashboard, grouped for display. Keys must exist in
 # config.DEFAULTS. Changes to keys in RESTART_REQUIRED only take effect when the
@@ -99,6 +107,17 @@ def create_app(ctx: AppContext) -> FastAPI:
     app = FastAPI(title="birdframe")
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
+    @app.middleware("http")
+    async def revalidate_shell(request: Request, call_next):
+        """The ES modules are imported without version stamps, so without an
+        explicit policy a phone may heuristically cache an old core.js next to
+        a new app.js after an update. Revalidating is a cheap 304 on the LAN."""
+        response = await call_next(request)
+        path = request.url.path
+        if path in ("/", "/sw.js") or path.startswith("/static/"):
+            response.headers.setdefault("Cache-Control", "no-cache")
+        return response
+
     _capture = {"state": "idle", "cancel": False, "result": None,
                 "species": [], "lock": _threading.Lock()}
     # Decoupled Studio jobs: generate a picture (no post) and post an existing one.
@@ -130,14 +149,23 @@ def create_app(ctx: AppContext) -> FastAPI:
     def service_worker():
         return FileResponse(STATIC / "sw.js", media_type="text/javascript")
 
-    def _icon(size: int) -> bytes:
+    @lru_cache(maxsize=8)
+    def _icon(size: int, rounded: bool = True) -> bytes:
+        # Supersampled drawing is ~20 ms; every page load asks for these.
         from birdframe.icon import render_icon
-        return render_icon(size)
+        return render_icon(size, rounded=rounded)
 
     @app.get("/icon-192.png")
     def icon192():
         from fastapi.responses import Response
         return Response(_icon(192), media_type="image/png")
+
+    @app.get("/apple-touch-icon.png", include_in_schema=False)
+    def apple_touch_icon():
+        # iOS masks home-screen icons itself and paints transparent corners
+        # black, so this one is full-bleed.
+        from fastapi.responses import Response
+        return Response(_icon(180, rounded=False), media_type="image/png")
 
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon():
@@ -463,7 +491,7 @@ def create_app(ctx: AppContext) -> FastAPI:
             if source_when.date() > created_at.date():
                 return JSONResponse({"error": "future days cannot be pictured yet"},
                                     status_code=400)
-            if ctx.store.day_detail(day) is None:
+            if not ctx.store.has_day(day):
                 return JSONResponse({"error": "no listening record for that day"},
                                     status_code=404)
         else:
@@ -611,6 +639,7 @@ def create_app(ctx: AppContext) -> FastAPI:
             "species_today": len(ctx.store.species_for_day(now)),
             "whitelist_size": len(getattr(getattr(rt, "detector", None), "whitelist", []) or []),
             "openai_key_set": getattr(ctx.artist, "image_client", None) is not None,
+            "image_model": getattr(getattr(ctx.artist, "image_client", None), "model", None),
             "archive_bytes": _dir_size(archive) if archive else 0,
             "backup_count": backups.count if backups else 0,
             "backup_latest": backups.latest if backups else None,
@@ -698,6 +727,7 @@ def create_app(ctx: AppContext) -> FastAPI:
         raw = ctx.store.day_detail(day)
         if raw is None:
             return JSONResponse({"error": "no detections on this day"}, status_code=404)
+        older, newer = ctx.store.day_neighbours(day)
         species = [_assess_species(ctx, s, day) for s in raw.pop("species")]
         species.sort(key=lambda x: (_TIER_ORDER[x["tier"]], -x["count"]))
         clips = []
@@ -716,6 +746,9 @@ def create_app(ctx: AppContext) -> FastAPI:
             "new_species": sorted(ctx.store.first_ever_on_day(parsed)),
             "clips": clips,
             "images": ctx.store.images_for_day(day),
+            # Paging links, so a day page needn't fetch the whole journal index.
+            "older": older,
+            "newer": newer,
         }
 
     @app.get("/api/patterns")
@@ -731,7 +764,10 @@ def create_app(ctx: AppContext) -> FastAPI:
         included = [e for e in entries if e["tier"] in wanted]
         aggregate = ctx.store.pattern_summary(
             start_day=_start_day(days),
-            species_names=[e["common_name"] for e in included],
+            # Every tier selected means every species: skip the name filter,
+            # which doubles the cost of each aggregate scan.
+            species_names=(None if len(included) == len(entries)
+                           else [e["common_name"] for e in included]),
         )
         meta = {e["common_name"]: e for e in entries}
         for row in aggregate["by_species"]:
@@ -872,7 +908,7 @@ def create_app(ctx: AppContext) -> FastAPI:
                            limit: int = Query(100, ge=1, le=250),
                            before: str | None = None,
                            days: int | None = Query(None, ge=1, le=3660)):
-        if not ctx.store.species_detail(common_name):
+        if ctx.store.first_ever(common_name):          # never heard: nothing to page
             return JSONResponse({"error": "not heard here"}, status_code=404)
         rows = ctx.store.species_observations(
             common_name, limit=limit, before=before, start_day=_start_day(days))
@@ -917,11 +953,18 @@ def create_app(ctx: AppContext) -> FastAPI:
         ]}
 
     @app.get("/api/image/{image_id}")
-    def image(image_id: int):
+    def image(image_id: int, w: int | None = Query(None, ge=1, le=4000)):
+        """The archived picture; `?w=` asks for a cached JPEG at least that wide."""
         rec = ctx.store.get_image(image_id)
         if rec is None or not Path(rec.path).exists():
             return JSONResponse({"error": "no such image"}, status_code=404)
-        return FileResponse(rec.path, media_type="image/png")
+        if w is None:
+            return FileResponse(rec.path, media_type="image/png", headers=IMAGE_CACHE)
+        from birdframe.compose import thumbnail_jpeg
+        width = next((size for size in THUMB_WIDTHS if size >= w), THUMB_WIDTHS[-1])
+        thumb = _derived_image(Path(rec.path), f"w{width}.jpg",
+                               lambda data: thumbnail_jpeg(data, width))
+        return FileResponse(thumb, media_type="image/jpeg", headers=IMAGE_CACHE)
 
     @app.post("/api/post-now")
     def post_now():
@@ -984,7 +1027,7 @@ def create_app(ctx: AppContext) -> FastAPI:
             when = datetime.strptime(day, "%Y-%m-%d").replace(hour=21)
         except ValueError:
             return JSONResponse({"error": "day must be YYYY-MM-DD"}, status_code=400)
-        if ctx.store.day_detail(day) is None:
+        if not ctx.store.has_day(day):
             return JSONResponse({"error": "no listening record for that day"},
                                 status_code=404)
         direction = ctx.artist.art_direction(when)
@@ -1062,7 +1105,8 @@ def create_app(ctx: AppContext) -> FastAPI:
         client = getattr(ctx.artist, "image_client", None)
         if client is None:
             return JSONResponse(
-                {"error": "set an OpenAI key (birdframe set-key) to generate previews"},
+                {"error": "set a key for the selected image provider "
+                          "(birdframe set-key openai|gemini) to generate previews"},
                 status_code=400)
         slug = style.name
         with _preview_lock:
@@ -1157,6 +1201,23 @@ def create_app(ctx: AppContext) -> FastAPI:
         return {"saved": saved, "restart_required": restart}
 
     return app
+
+
+def _derived_image(src: Path, key: str, make: Callable[[bytes], bytes]) -> Path:
+    """A cached derivative of an archived picture (e.g. a thumbnail), rebuilt
+    only when the original is newer and written atomically, so concurrent
+    requests never serve a half-written file."""
+    out = src.parent / "derived" / f"{src.stem}-{key}"
+    try:
+        if out.stat().st_mtime >= src.stat().st_mtime:
+            return out
+    except FileNotFoundError:
+        pass
+    out.parent.mkdir(parents=True, exist_ok=True)
+    partial = out.with_name(f".{out.name}.{os.getpid()}-{threading.get_ident()}.partial")
+    partial.write_bytes(make(src.read_bytes()))
+    partial.replace(out)
+    return out
 
 
 def _publish(ctx: AppContext, rec, force: bool = False):

@@ -143,7 +143,8 @@ def _prune_archive(images_dir: Path, config) -> None:
         return
     import time
     cutoff = time.time() - keep * 86400
-    for f in Path(images_dir).glob("*.png"):
+    # Cached thumbnails in derived/ are rebuilt on demand, so they age out too.
+    for f in [*Path(images_dir).glob("*.png"), *Path(images_dir).glob("derived/*")]:
         try:
             if f.stat().st_mtime < cutoff:
                 f.unlink()
