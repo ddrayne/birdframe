@@ -1,5 +1,8 @@
 import plistlib
+import sys
 from pathlib import Path
+
+import pytest
 
 from birdframe import service
 
@@ -12,6 +15,7 @@ def test_plist_dict_is_wellformed():
     assert d["StandardOutPath"].endswith("birdframe.log")
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="compiles a macOS launcher with clang")
 def test_make_app_creates_bundle(tmp_path, monkeypatch):
     monkeypatch.setattr(service, "APP_PATH", tmp_path / "Birdframe.app")
     monkeypatch.setattr(service, "_write_icns", lambda dest: False)  # skip iconutil in tests

@@ -13,7 +13,7 @@ dependencies = [
     "httpx>=0.27",
     "fastapi>=0.110",
     "uvicorn>=0.29",
-    "rumps>=0.4.0",
+    "rumps>=0.4.0; sys_platform == 'darwin'",   # menu bar; macOS only
     "keyring>=25.0",
     "tomlkit>=0.12",
     "astral>=3.2",
