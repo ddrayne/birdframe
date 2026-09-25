@@ -132,6 +132,14 @@ hard-veto a species via the "not here" blocklist (`config.blocked_species`).
 - **Icon/PWA** (`icon.py` renders the app icon; manifest + `sw.js`). The shell
   and ES modules are served `Cache-Control: no-cache` (modules are imported
   without version stamps); bump `?v=` in `index.html`/`sw.js` with UI changes.
+- **Public site** (`public_site.py`, `public_template/`, `birdframe publish`):
+  a static, read-only edition built from aggregates only: confirmed/probable
+  species, real paintings (no fallback posters), no audio, coordinates, raw
+  detections or frame address. `SitePublisher` rebuilds it on its own thread
+  after new paintings and hourly; `public_*` settings are config-file only (the
+  LAN dashboard must never choose a folder to write or a command to run).
+  Routes are plain anchors (`#birds`, `#p-<id>`, `#b-<slug>`, `#frame`).
+  `frame_url = ""` disables the frame cleanly (`Publisher.enabled`).
 - **Dashboard images**: lists use `/api/image/{id}?w=` (cached JPEGs in
   `images/derived/`), never the 3 MB originals; `/api/image/{id}/eink` is the
   simulated frame print. State-changing requests labelled

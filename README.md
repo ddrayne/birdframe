@@ -136,6 +136,43 @@ changing signal level, last completed audio chunk, and automatic reconnects.
 Detection count is not used as an audio health signal—a silent garden is valid
 as long as fresh, changing samples continue to arrive.
 
+## A public edition of the journal
+
+birdframe can publish a read-only website of your paintings and birds that
+anyone can visit: the latest painting hung like a print, notes on the season,
+the whole collection by month, a page per bird with a 24-hour "day clock" of
+when it sings, and a week-by-week chart of the season. **Frame mode**
+(`…/#frame`) shows the latest painting full screen, so any old tablet becomes
+a picture frame without an Inky display.
+
+It is a static site: HTML, CSS, JSON and WebP images that any static host can
+serve (GitHub Pages, Cloudflare Pages, Netlify, a Raspberry Pi). Nothing on it
+can write back to birdframe, and it leaves out what shouldn't leave the house:
+coordinates, audio, raw detections, the frame's address, and doubtful
+identifications (only confirmed and probable birds appear).
+
+```sh
+uv run birdframe publish ~/Sites/birdframe      # build it once, then preview:
+python3 -m http.server --directory ~/Sites/birdframe 8356
+```
+
+To keep it current, add to `~/.config/birdframe/config.toml` and restart:
+
+```toml
+place_name = "Edinburgh"                 # names the place in prompts and on the site
+public_site_dir = "~/Sites/birdframe"    # rebuilt after each painting, and hourly
+public_site_url = "https://example.org"  # optional: for link previews
+public_deploy_command = "npx wrangler pages deploy {dir} --project-name=birdframe"
+```
+
+The deploy command runs after each build with `{dir}` replaced by the folder;
+it is split like a shell command but never run through a shell. These settings
+live only in `config.toml`: the LAN dashboard can trigger **Publish now** but
+can't change where the site is written or how it's deployed.
+
+**Without an Inky frame**: set `frame_url = ""`. Paintings are still made on
+schedule, archived and published; nothing is sent to a display.
+
 ## Agent and MCP access
 
 The dashboard includes a read-only analytical API for agents as well as its UI.
