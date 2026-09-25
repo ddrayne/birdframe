@@ -157,6 +157,25 @@ def _notify_first_ever(common_name: str) -> None:
     _notify("New bird for your window! 🐦", f"First time hearing a {common_name}.")
 
 
+def _first_notice_in(marker: Path, hours: float, now: float | None = None) -> bool:
+    """True at most once per `hours`, remembered across restarts in a marker
+    file's mtime — a crash loop must never become a notification storm."""
+    import time
+    now = time.time() if now is None else now
+    try:
+        if now - marker.stat().st_mtime < hours * 3600:
+            return False
+    except OSError:
+        pass
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.touch()
+        os.utime(marker, (now, now))
+    except OSError:
+        pass
+    return True
+
+
 def _osa_quote(s: str) -> str:
     """A safe AppleScript string literal (double-quoted, escaped)."""
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
@@ -174,19 +193,13 @@ def _notify(title: str, message: str) -> None:
 
 def _start_listener(runtime: Runtime, config: Config) -> None:
     from birdframe.listener import AudioListener
-    import time
-
-    last_notice = 0.0
 
     def on_status(s: str) -> None:
-        nonlocal last_notice
         was_ok = runtime.status == "listening"
         runtime.status = s
         log.info("listener: %s", s)
         trouble = s.startswith(("audio error", "recovering", "detector error"))
-        now = time.monotonic()
-        if trouble and was_ok and now - last_notice >= 1800:
-            last_notice = now
+        if trouble and was_ok and _first_notice_in(DATA_DIR / ".notice-audio", hours=0.5):
             _notify("Microphone recovery",
                     "birdframe found an unhealthy audio stream and is reconnecting it.")
 
@@ -228,12 +241,41 @@ def _start_health_watchdog(runtime: Runtime) -> None:
                 continue
             reason = health["restart_reason"] or "audio pipeline stalled"
             log.error("Watchdog is restarting birdframe: %s", reason)
-            runtime.notify(
-                "Birdframe is restarting",
-                "The audio pipeline could not recover locally; launchd will bring it back.")
+            if _first_notice_in(DATA_DIR / ".notice-restart", hours=6):
+                runtime.notify(
+                    "Birdframe is restarting",
+                    "The audio pipeline could not recover locally; launchd will bring it back.")
             os._exit(70)
 
     threading.Thread(target=supervise, name="birdframe-watchdog", daemon=True).start()
+
+
+def _scheduler_step(runtime: Runtime, now: datetime, exit_process=os._exit) -> None:
+    """One scheduler beat: the nightly freshness restart, then any due post."""
+    if runtime.should_restart_for_freshness(now):
+        # A clean daily restart re-resolves the frame's mDNS name and bounds
+        # any slow resource creep. The LaunchAgent brings it right back.
+        log.info("Nightly freshness restart")
+        exit_process(0)
+        return
+    runtime.tick(now)
+
+
+def _start_scheduler(runtime: Runtime) -> None:
+    """Posting gets its own thread. It used to run inside the menu bar's timer
+    on the AppKit main thread, so a multi-minute paid render (plus frame
+    retries) froze the menu, and the nightly restart check, while it ran."""
+    import time
+
+    def run() -> None:
+        while True:
+            try:
+                _scheduler_step(runtime, datetime.now())
+            except Exception:
+                log.exception("Scheduler tick failed")
+            time.sleep(30)
+
+    threading.Thread(target=run, name="birdframe-scheduler", daemon=True).start()
 
 
 def _start_dashboard(runtime: Runtime, config: Config) -> None:
@@ -404,6 +446,7 @@ def main() -> None:
     _start_listener(runtime, config)
     _start_health_watchdog(runtime)
     _start_dashboard(runtime, config)
+    _start_scheduler(runtime)
 
     from birdframe.menubar import BirdframeMenuBar
     log.info("birdframe is listening. Mode: %s", config.post_mode)

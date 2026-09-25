@@ -10,7 +10,7 @@ class FakeResponse:
 def test_publish_success_202():
     posts = []
 
-    def fake_post(url, files, data, timeout):
+    def fake_post(url, files, data, timeout, headers=None):
         posts.append((url, files, data))
         return FakeResponse(202)
 
@@ -27,7 +27,7 @@ def test_publish_success_202():
 def test_publish_force_overrides_hold():
     posts = []
 
-    def fake_post(url, files, data, timeout):
+    def fake_post(url, files, data, timeout, headers=None):
         posts.append(data)
         return FakeResponse(202)
 
@@ -40,7 +40,7 @@ def test_publish_force_overrides_hold():
 def test_publish_held_409_is_not_retried():
     calls = {"n": 0}
 
-    def fake_post(url, files, data, timeout):
+    def fake_post(url, files, data, timeout, headers=None):
         calls["n"] += 1
         return FakeResponse(409)
 
@@ -54,7 +54,7 @@ def test_publish_held_409_is_not_retried():
 def test_publish_network_error_retries_then_fails():
     calls = {"n": 0}
 
-    def boom(url, files, data, timeout):
+    def boom(url, files, data, timeout, headers=None):
         calls["n"] += 1
         raise ConnectionError("frame offline")
 
@@ -63,3 +63,20 @@ def test_publish_network_error_retries_then_fails():
     result = pub.publish(b"PNGBYTES")
     assert result.status == "unreachable"
     assert calls["n"] == 3
+
+
+def test_retries_of_one_publish_share_an_idempotency_key():
+    keys = []
+
+    def flaky(url, files, data, timeout, headers=None):
+        keys.append(headers["Idempotency-Key"])
+        if len(keys) == 1:
+            raise TimeoutError("read timed out after the frame accepted it")
+        return FakeResponse(200)
+
+    pub = Publisher("http://frame.local:5000", hold_minutes=0, saturation=0.6,
+                    http_post=flaky, max_retries=3, backoff=0)
+    assert pub.publish(b"PNGBYTES").status == "posted"
+    assert len(keys) == 2 and keys[0] == keys[1]
+    pub.publish(b"PNGBYTES")
+    assert keys[2] != keys[0]                 # a new publish is a new request

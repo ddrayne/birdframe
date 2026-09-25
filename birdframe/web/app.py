@@ -42,6 +42,17 @@ RESTART_REQUIRED = {
     "latitude", "longitude", "geo_floor", "chunk_seconds",
     "chunk_overlap_seconds", "dashboard_port",
 }
+# Values the running app can't interpret are refused at the door: a typo'd
+# live-window time used to raise inside every scheduler tick, silently
+# stopping all posting until someone noticed.
+SETTING_CHOICES = {
+    "post_mode": ("daily", "live", "manual"),
+    "style_mode": ("responsive", "rotate", "pinned"),
+    "image_provider": ("openai", "gemini"),
+    "image_quality": ("low", "medium", "high", "xhigh", "max"),
+}
+CLOCK_SETTINGS = {"live_window_start", "live_window_end"}
+UNIT_INTERVAL_SETTINGS = {"confidence_threshold", "min_species_confidence", "frame_saturation"}
 # The image settings (provider/model/quality) apply live: apply_settings
 # rebuilds the artist's image client from the saved config.
 # 'latitude'/'longitude' are floats but the settings-POST coercion handles them;
@@ -1169,7 +1180,7 @@ def create_app(ctx: AppContext) -> FastAPI:
         cfg = ctx.config
         body = await request.json()
         editable = {k for _, keys in EDITABLE_SETTINGS for k in keys}
-        saved, restart, errors = [], [], {}
+        updates, errors = {}, {}
         for key, raw in body.items():
             if key not in editable:
                 errors[key] = "not an editable setting"
@@ -1180,6 +1191,18 @@ def create_app(ctx: AppContext) -> FastAPI:
             except (TypeError, ValueError):
                 errors[key] = f"expected {type(getattr(cfg, key)).__name__}"
                 continue
+            if key in SETTING_CHOICES and coerced not in SETTING_CHOICES[key]:
+                errors[key] = "use one of: " + ", ".join(SETTING_CHOICES[key])
+                continue
+            if key in CLOCK_SETTINGS:
+                try:
+                    coerced = datetime.strptime(coerced.strip(), "%H:%M").strftime("%H:%M")
+                except ValueError:
+                    errors[key] = 'use a 24-hour time like "08:00"'
+                    continue
+            if key in UNIT_INTERVAL_SETTINGS and not 0.0 <= coerced <= 1.0:
+                errors[key] = "use a value between 0 and 1"
+                continue
             if key == "post_times" and coerced.strip():
                 from birdframe.scheduler import parse_slots
                 slots = parse_slots(coerced, "")
@@ -1188,13 +1211,16 @@ def create_app(ctx: AppContext) -> FastAPI:
                     errors[key] = ('could not read every entry — use times like '
                                    '"06:30 dawn, 12:00, 21:00 evening"')
                     continue
-            setattr(cfg, key, coerced)
-            saved.append(key)
-            if key in RESTART_REQUIRED:
-                restart.append(key)
+            updates[key] = coerced
         if errors:
+            # All or nothing: the running app shares this config object, so a
+            # partial apply would change live behaviour without being saved.
             return JSONResponse({"error": "invalid settings", "fields": errors},
                                 status_code=400)
+        for key, value in updates.items():
+            setattr(cfg, key, value)
+        saved = list(updates)
+        restart = [key for key in updates if key in RESTART_REQUIRED]
         cfg.save()
         if ctx.apply_settings:
             ctx.apply_settings()   # push live-applicable changes onto running objects

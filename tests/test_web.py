@@ -700,3 +700,22 @@ def test_apple_touch_icon_is_full_bleed(tmp_path):
     icon = _Image.open(_io.BytesIO(client.get("/apple-touch-icon.png").content)).convert("RGBA")
     assert icon.size == (180, 180)
     assert icon.getpixel((0, 0))[3] == 255          # no transparent corner for iOS to blacken
+
+
+def test_settings_refuse_values_the_scheduler_cannot_read(tmp_path):
+    _, ctx, client = _client(tmp_path)
+    bad = client.post("/api/settings", json={
+        "live_window_start": "8am", "post_mode": "Daily",
+        "frame_saturation": "1.4", "image_quality": "ultra"})
+    assert bad.status_code == 400
+    assert set(bad.json()["fields"]) == {"live_window_start", "post_mode",
+                                          "frame_saturation", "image_quality"}
+    assert ctx.config.post_mode == "daily"
+    mixed = client.post("/api/settings", json={"post_mode": "manual", "live_window_end": "late"})
+    assert mixed.status_code == 400
+    assert ctx.config.post_mode == "daily"               # nothing was half-applied
+    ok = client.post("/api/settings", json={"live_window_start": "7:30",
+                                            "image_quality": "xhigh"})
+    assert ok.status_code == 200
+    assert ctx.config.live_window_start == "07:30"       # normalised for the scheduler
+    assert ctx.config.image_quality == "xhigh"
