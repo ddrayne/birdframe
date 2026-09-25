@@ -223,8 +223,26 @@ export function openLightbox(src, caption, imageAlt = '') {
   const archived = /^\/api\/image\/(\d+)(?:\?|$)/.exec(src);
   send.hidden = !archived;
   if (archived) send.dataset.sendImage = archived[1];
+  // …and can be previewed as the e-ink panel will actually print it.
+  const eink = document.querySelector('#lightboxEink');
+  eink.hidden = !archived;
+  eink.setAttribute('aria-pressed', 'false');
+  eink.textContent = 'On the frame';
+  if (archived) Object.assign(eink.dataset, {imageId: archived[1], original: src});
   box.hidden = false;
   document.body.style.overflow = 'hidden';
+}
+
+function toggleEinkView(button) {
+  const img = document.querySelector('#lightboxImage');
+  const printed = button.getAttribute('aria-pressed') !== 'true';
+  button.setAttribute('aria-pressed', String(printed));
+  button.textContent = printed ? 'Printing preview…' : 'On the frame';
+  img.onload = () => {
+    button.textContent = printed ? 'Original colours' : 'On the frame';
+    img.onload = null;
+  };
+  img.src = printed ? `/api/image/${button.dataset.imageId}/eink` : button.dataset.original;
 }
 
 export function closeLightbox() {
@@ -241,6 +259,8 @@ export function initLightbox() {
     }
     const send = event.target.closest('#lightboxSend');
     if (send) { sendImageToFrame(send.dataset.sendImage, send); return; }
+    const eink = event.target.closest('#lightboxEink');
+    if (eink) { toggleEinkView(eink); return; }
     if (event.target.closest('[data-action="close-lightbox"]') || event.target.id === 'lightbox') closeLightbox();
   });
   document.addEventListener('keydown', event => { if (event.key === 'Escape') closeLightbox(); });

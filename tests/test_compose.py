@@ -95,3 +95,15 @@ def test_caption_keeps_whole_names_and_counts_the_rest():
     assert line.endswith(f" + {12 - len(shown)} more")
     assert all(name in names for name in shown)          # no name cut mid-word
     assert _names_line(draw, names[:2], _font(24), 1140) == ", ".join(names[:2])
+
+
+def test_eink_preview_uses_only_the_panels_six_blended_inks():
+    from birdframe.compose import eink_preview
+    art = Image.new("RGB", (120, 160))
+    art.putdata([(x * 2 % 256, y % 256, (x * y) % 256) for y in range(160) for x in range(120)])
+    buf = io.BytesIO()
+    art.save(buf, format="PNG")
+    printed = Image.open(io.BytesIO(eink_preview(buf.getvalue(), saturation=0.6))).convert("RGB")
+    assert printed.size == (120, 160)
+    blended = {(0, 0, 0), (199, 200, 201), (227, 216, 43), (196, 43, 45), (37, 35, 158), (35, 157, 42)}
+    assert {colour for _, colour in printed.getcolors(1000)} <= blended

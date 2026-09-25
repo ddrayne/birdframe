@@ -85,6 +85,31 @@ def fallback_poster(date: datetime, species: list[str], label: str = "") -> byte
     return out.getvalue()
 
 
+# inky-frame's calibration for the 13.3" Spectra 6 panel (inky_frame/imaging.py):
+# the pure inks the panel is driven with, and how each one actually looks.
+_PANEL_INKS = [(0, 0, 0), (255, 255, 255), (255, 255, 0),
+               (255, 0, 0), (0, 0, 255), (0, 255, 0)]
+_PANEL_SEEN = [(0, 0, 0), (161, 164, 165), (208, 190, 71),
+               (156, 72, 75), (61, 59, 94), (58, 91, 70)]
+
+
+def eink_preview(image_bytes: bytes, saturation: float = 0.6) -> bytes:
+    """The picture as the frame will print it: the same Floyd–Steinberg dither
+    onto the saturation-blended six-ink palette that inky-frame applies, in the
+    colours its own preview shows."""
+    palette = [round(seen * saturation + ink * (1.0 - saturation))
+               for inks, seens in zip(_PANEL_INKS, _PANEL_SEEN)
+               for ink, seen in zip(inks, seens)]
+    palette_image = Image.new("P", (1, 1))
+    palette_image.putpalette(palette + [0] * (768 - len(palette)))
+    art = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    printed = art.quantize(colors=6, palette=palette_image,
+                           dither=Image.Dither.FLOYDSTEINBERG)
+    out = io.BytesIO()
+    printed.save(out, format="PNG")
+    return out.getvalue()
+
+
 def thumbnail_jpeg(image_bytes: bytes, width: int) -> bytes:
     """A small JPEG of a frame picture for galleries — a phone showing a card
     105px wide shouldn't download and decode a 3 MB, 1200×1600 PNG."""

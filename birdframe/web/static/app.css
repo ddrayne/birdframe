@@ -501,6 +501,9 @@ select { cursor: pointer; }
 .lightbox > div { position: fixed; bottom: calc(18px + env(safe-area-inset-bottom)); left: 20px; right: 20px; color: white; text-align: center; }
 .lightbox-send { display: block; margin: 12px auto 0; padding: 8px 18px; border-radius: 999px; border: 1px solid rgb(255 255 255 / 30%); background: rgb(255 255 255 / 10%); color: white; cursor: pointer; }
 .lightbox-send:disabled { opacity: .6; cursor: default; }
+.lightbox-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.lightbox-actions .lightbox-send { margin: 0; }
+.lightbox-send[aria-pressed="true"] { background: rgb(255 255 255 / 24%); border-color: rgb(255 255 255 / 55%); }
 /* Clear the iOS status bar / home indicator in standalone mode. */
 .lightbox-close { position: fixed; top: calc(16px + env(safe-area-inset-top)); right: 16px; width: 42px; height: 42px; border-radius: 50%; border: 1px solid rgb(255 255 255 / 24%); background: rgb(255 255 255 / 8%); color: white; font-size: 23px; cursor: pointer; }
 .toast { position: fixed; z-index: 110; right: 20px; bottom: 24px; max-width: 360px; padding: 12px 16px; border-radius: 11px; background: var(--ink); color: var(--page); box-shadow: var(--shadow); }
