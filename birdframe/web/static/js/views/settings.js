@@ -123,7 +123,11 @@ function settingField(field) {
   const note = field.restart ? 'Applies after restart' : 'Applies live';
   let control;
   if (ENUMS[field.key]) {
-    control = `<select id="setting-${attr(field.key)}" data-key="${attr(field.key)}">${ENUMS[field.key].map(value => `<option value="${attr(value)}" ${String(field.value) === value ? 'selected' : ''}>${esc(value)}</option>`).join('')}</select>`;
+    // Keep an unexpected saved value visible; otherwise the browser would quietly
+    // select the first option and the next save would change it.
+    const current = String(field.value);
+    const values = ENUMS[field.key].includes(current) ? ENUMS[field.key] : [current, ...ENUMS[field.key]];
+    control = `<select id="setting-${attr(field.key)}" data-key="${attr(field.key)}">${values.map(value => `<option value="${attr(value)}" ${current === value ? 'selected' : ''}>${esc(value)}</option>`).join('')}</select>`;
   } else if (field.key === 'post_times') {
     return scheduleEditor(field.value);
   } else if (SUGGESTIONS[field.key]) {
