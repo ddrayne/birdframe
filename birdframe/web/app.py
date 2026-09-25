@@ -26,7 +26,7 @@ IMAGE_CACHE = {"Cache-Control": "public, max-age=86400"}
 # app restarts (they configure objects built once at startup); everything else
 # is applied to the running app immediately.
 EDITABLE_SETTINGS = [
-    ("Location", ["latitude", "longitude"]),
+    ("Location", ["place_name", "latitude", "longitude"]),
     ("Posting", ["post_mode", "post_times"]),
     ("Live mode", ["live_min_gap_minutes", "live_window_start", "live_window_end"]),
     ("Cost controls", ["min_species_for_image", "max_paid_images_per_day"]),
@@ -74,6 +74,7 @@ class AppContext:
     runtime: object = None          # live daemon state (health, listening status)
     text_client: object = None      # OpenAI client for the day-narration (or None)
     narration_model: str = "gpt-4.1-mini"
+    public_site: object = None      # public_site.SitePublisher when a public site is configured
 
 
 def _assess_species(ctx, s, day=None):
@@ -669,7 +670,30 @@ def create_app(ctx: AppContext) -> FastAPI:
             "backup_latest": backups.latest if backups else None,
             "backup_bytes": backups.bytes if backups else 0,
             "post_mode": getattr(ctx.config, "post_mode", None),
+            "frame_enabled": bool(getattr(ctx.config, "frame_url", "")),
+            "public_site": _public_status(),
         }
+
+    def _public_status():
+        site = ctx.public_site
+        if site is None:
+            return {"enabled": False}
+        return {"enabled": True, "url": getattr(ctx.config, "public_site_url", "") or None,
+                **site.status}
+
+    @app.get("/api/public")
+    def public_site_status():
+        return _public_status()
+
+    @app.post("/api/public/publish")
+    def publish_public_site():
+        """Rebuild the public site now, in the background. Where it's built and
+        how it's deployed come only from config.toml, never from a request."""
+        if ctx.public_site is None:
+            return JSONResponse({"error": "set public_site_dir in config.toml to publish a public site"},
+                                status_code=400)
+        started = ctx.public_site.publish_now()
+        return {"status": "started" if started else "running"}
 
     @app.post("/api/backup")
     def backup_now():
@@ -680,9 +704,7 @@ def create_app(ctx: AppContext) -> FastAPI:
         path = create_manual_backup(ctx.store, Path(ctx.backup_dir), ctx.now())
         return {"created": path.name, "bytes": path.stat().st_size}
 
-    def _rarity_label(geo: float) -> str:
-        return ("very unusual here" if geo < 0.06 else "unusual here" if geo < 0.12
-                else "uncommon here" if geo < 0.30 else "common here")
+    from birdframe.reliability import rarity_label as _rarity_label
 
     def _life_entries() -> list[dict]:
         """The shared, reliability-aware species directory payload."""
@@ -966,7 +988,7 @@ def create_app(ctx: AppContext) -> FastAPI:
         # The most recently posted picture is the one currently on the frame.
         posted = [r for r in rows if r.posted_at is not None]
         on_frame_id = max(posted, key=lambda r: r.posted_at).id if posted else None
-        return {"images": [
+        return {"frame_enabled": bool(getattr(ctx.config, "frame_url", "")), "images": [
             {"id": r.id, "generated_at": r.generated_at.isoformat(),
              "source_day": r.source_day or r.generated_at.strftime("%Y-%m-%d"),
              "style": r.style, "style_reason": r.style_reason,

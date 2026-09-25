@@ -757,3 +757,23 @@ def test_saving_the_whole_form_reports_only_what_changed(tmp_path):
     body["latitude"] = 55.9
     changed = client.post("/api/settings", json=body).json()
     assert changed == {"saved": ["latitude"], "restart_required": ["latitude"]}
+
+
+def test_public_site_endpoints_and_frame_flag(tmp_path):
+    _, ctx, client = _client(tmp_path)
+    health = client.get("/api/health").json()
+    assert health["frame_enabled"] is True and health["public_site"] == {"enabled": False}
+    assert client.post("/api/public/publish").status_code == 400
+
+    class FakeSite:
+        status = {"built_at": None, "error": None, "running": False}
+        def publish_now(self):
+            return True
+    ctx.public_site = FakeSite()
+    assert client.post("/api/public/publish").json() == {"status": "started"}
+    assert client.get("/api/public").json()["enabled"] is True
+    ctx.config.frame_url = ""
+    assert client.get("/api/health").json()["frame_enabled"] is False
+    assert client.get("/api/history").json()["frame_enabled"] is False
+    assert client.post("/api/settings", json={"place_name": "Leith"}).status_code == 200
+    assert ctx.config.place_name == "Leith"

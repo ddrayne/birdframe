@@ -103,3 +103,10 @@ def for_artwork(a: Assessment, geo_plausibility: float) -> bool:
     if a.tier == "probable" and geo_plausibility >= ARTWORK_GEO_FLOOR:
         return True
     return False
+
+
+def rarity_label(geo_plausibility: float) -> str:
+    """How expected a species is here, in words (from BirdNET's geo model)."""
+    geo = geo_plausibility
+    return ("very unusual here" if geo < 0.06 else "unusual here" if geo < 0.12
+            else "uncommon here" if geo < 0.30 else "common here")

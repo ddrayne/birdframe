@@ -70,6 +70,7 @@ async function initialise() {
   try {
     const health = await api('/api/health');
     setListening(health.listening, health.listening ? 'Listening' : health.status);
+    state.frameEnabled = health.frame_enabled !== false;
   } catch { setListening(false, 'Offline'); }
   await renderRoute();
 }

@@ -9,6 +9,7 @@ import tomlkit
 DEFAULT_CONFIG_PATH = Path.home() / ".config" / "birdframe" / "config.toml"
 
 DEFAULTS = {
+    "place_name": "Edinburgh",     # how prompts and the public site name the place
     "latitude": 55.95,
     "longitude": -3.19,
     "input_device": "",            # "" = system default input
@@ -47,11 +48,19 @@ DEFAULTS = {
     "daily_restart_hour": 4,       # self-restart at this hour to bound resource creep (-1 = never)
     "min_species_confidence": 0.0,   # hard hide floor; 0 = show everything, marked by reliability tier
     "dashboard_port": 8355,
+    # Public, read-only edition of the journal (a static site; see public_site.py).
+    # Deliberately not editable from the LAN dashboard: they name a folder to
+    # write into and a command to run.
+    "public_site_dir": "",         # build it here ("" = off)
+    "public_site_url": "",         # where it is hosted, for link previews (optional)
+    "public_site_title": "",       # "" = "The <place_name> Window"
+    "public_deploy_command": "",   # run after each build; {dir} is the built folder
 }
 
 
 @dataclass
 class Config:
+    place_name: str
     latitude: float
     longitude: float
     input_device: str
@@ -88,6 +97,10 @@ class Config:
     daily_restart_hour: int
     min_species_confidence: float
     dashboard_port: int
+    public_site_dir: str
+    public_site_url: str
+    public_site_title: str
+    public_deploy_command: str
     path: Path = DEFAULT_CONFIG_PATH
 
     @classmethod

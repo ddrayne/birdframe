@@ -1,6 +1,7 @@
 """Entry point: build everything from config + Keychain and run forever."""
 from __future__ import annotations
 
+import json
 import logging
 import os
 import subprocess
@@ -20,6 +21,9 @@ from birdframe.weather import describe_weather
 
 DATA_DIR = Path.home() / ".local" / "share" / "birdframe"
 LOG_PATH = Path.home() / "Library" / "Logs" / "birdframe.log"
+# BirdNET's regional plausibility per species, saved at startup so the public
+# site can judge reliability without loading the model (`birdframe publish`).
+GEO_PATH = DATA_DIR / "geo.json"
 
 log = logging.getLogger("birdframe")
 
@@ -109,6 +113,10 @@ def build_runtime(config: Config) -> Runtime:
         when=datetime.now(), blocklist=config.blocked_species,
     )
     log.info("Whitelist: %d plausible local species", len(detector.whitelist))
+    try:
+        GEO_PATH.write_text(json.dumps(getattr(detector, "geo_by_scientific", {})))
+    except OSError as exc:
+        log.warning("Could not save the plausibility map: %s", exc)
 
     image_client = _make_image_client(config)
 
@@ -121,6 +129,7 @@ def build_runtime(config: Config) -> Runtime:
         max_paid_images_per_day=config.max_paid_images_per_day,
         min_species_confidence=config.min_species_confidence,
         geo_lookup=getattr(detector, "geo_by_scientific", {}),
+        place_name=config.place_name,
     )
     from birdframe.scheduler import parse_slots
     artist.scheduled_slot_count = len(parse_slots(config.post_times, config.post_time))
@@ -261,10 +270,28 @@ def _scheduler_step(runtime: Runtime, now: datetime, exit_process=os._exit) -> N
     runtime.tick(now)
 
 
-def _start_scheduler(runtime: Runtime) -> None:
+def _make_site_publisher(runtime: Runtime, config: Config):
+    """The public site's background publisher, or None when not configured."""
+    if not config.public_site_dir:
+        return None
+    from birdframe.public_site import SitePublisher, build_site
+    out_dir = Path(config.public_site_dir).expanduser()
+
+    def build() -> dict:
+        return build_site(runtime.store, runtime.artist.styles, out_dir,
+                          place=config.place_name, title=config.public_site_title,
+                          base_url=config.public_site_url,
+                          geo_lookup=getattr(runtime.detector, "geo_by_scientific", {}))
+
+    return SitePublisher(build, latest=runtime.store.latest_image_id,
+                         deploy_command=config.public_deploy_command, out_dir=out_dir)
+
+
+def _start_scheduler(runtime: Runtime, site=None) -> None:
     """Posting gets its own thread. It used to run inside the menu bar's timer
     on the AppKit main thread, so a multi-minute paid render (plus frame
-    retries) froze the menu, and the nightly restart check, while it ran."""
+    retries) froze the menu, and the nightly restart check, while it ran.
+    The public site, if any, is rebuilt on its own thread when it falls due."""
     import time
 
     def run() -> None:
@@ -273,12 +300,14 @@ def _start_scheduler(runtime: Runtime) -> None:
                 _scheduler_step(runtime, datetime.now())
             except Exception:
                 log.exception("Scheduler tick failed")
+            if site is not None:
+                site.maybe_publish()
             time.sleep(30)
 
     threading.Thread(target=run, name="birdframe-scheduler", daemon=True).start()
 
 
-def _start_dashboard(runtime: Runtime, config: Config) -> None:
+def _start_dashboard(runtime: Runtime, config: Config, site=None) -> None:
     import uvicorn
 
     from birdframe.web.app import AppContext, create_app
@@ -298,6 +327,7 @@ def _start_dashboard(runtime: Runtime, config: Config) -> None:
         runtime.artist.min_species_confidence = config.min_species_confidence
         runtime.artist.style_mode = config.style_mode
         runtime.artist.pinned_style = config.pinned_style
+        runtime.artist.place_name = config.place_name
         # Rebuild the paid painter so provider/model/quality switches apply
         # without a restart (cheap: clients are lazy, no network on construct).
         runtime.artist.image_client = _make_image_client(config)
@@ -323,7 +353,7 @@ def _start_dashboard(runtime: Runtime, config: Config) -> None:
                      preview_dir=DATA_DIR / "style_previews",
                      backup_dir=DATA_DIR / "backups",
                      geo_lookup=getattr(runtime.detector, "geo_by_scientific", {}),
-                     runtime=runtime, text_client=text_client)
+                     runtime=runtime, text_client=text_client, public_site=site)
     app = create_app(ctx)
     # Bind to all interfaces so other devices on the home network can reach it.
     server = uvicorn.Server(uvicorn.Config(
@@ -381,12 +411,47 @@ def _doctor() -> int:
         print(f"  {warn} microphone     could not query input devices: {exc}")
     import httpx
     frame = config.frame_url.rstrip("/")
-    try:
-        r = httpx.get(f"{frame}/status", timeout=5)
-        print(f"  {ok if r.status_code == 200 else warn} inky frame     {frame} — HTTP {r.status_code}")
-    except Exception:
-        print(f"  {warn} inky frame     {frame} — unreachable (birdframe still runs; images are archived)")
+    if not frame:
+        print("    inky frame     not configured (paintings are archived, not posted)")
+    else:
+        try:
+            r = httpx.get(f"{frame}/status", timeout=5)
+            print(f"  {ok if r.status_code == 200 else warn} inky frame     {frame} — HTTP {r.status_code}")
+        except Exception:
+            print(f"  {warn} inky frame     {frame} — unreachable (birdframe still runs; images are archived)")
+    if config.public_site_dir:
+        print(f"  {ok} public site    builds into {config.public_site_dir}"
+              + (" and deploys" if config.public_deploy_command else ""))
+    else:
+        print("    public site    off (set public_site_dir in config.toml)")
     print(f"\n  dashboard will be at http://localhost:{config.dashboard_port}")
+    return 0
+
+
+def _publish_site(argv: list[str]) -> int:
+    """`birdframe publish [folder]` — build the public, read-only site now."""
+    from birdframe.public_site import build_site, deploy
+    config = Config.load()
+    target = argv[1] if len(argv) > 1 else config.public_site_dir
+    if not target:
+        print("Name a folder to build into, e.g.  birdframe publish ~/Sites/birdframe\n"
+              "or set public_site_dir in ~/.config/birdframe/config.toml.")
+        return 1
+    out_dir = Path(target).expanduser()
+    store = Store(DATA_DIR / "birdframe.sqlite")
+    geo = json.loads(GEO_PATH.read_text()) if GEO_PATH.exists() else {}
+    if not geo:
+        print("Note: no plausibility map yet (run birdframe once); reliability "
+              "is judged on confidence alone.")
+    summary = build_site(store, load_styles(), out_dir, place=config.place_name,
+                         title=config.public_site_title, base_url=config.public_site_url,
+                         geo_lookup=geo)
+    print(f"Built {summary['paintings']} paintings and {summary['species']} birds into {out_dir}")
+    if config.public_deploy_command and len(argv) <= 1:
+        deploy(out_dir, config.public_deploy_command)
+        print("Deployed.")
+    else:
+        print(f"Preview it:  python3 -m http.server --directory {out_dir} 8356")
     return 0
 
 
@@ -423,6 +488,8 @@ def main() -> None:
         raise SystemExit(_doctor())
     if argv and argv[0] == "backup":
         raise SystemExit(_backup_now())
+    if argv and argv[0] == "publish":
+        raise SystemExit(_publish_site(argv))
     if argv and argv[0] in _SERVICE_CMDS:
         raise SystemExit(_run_service(argv[0]))
     if argv and argv[0] in ("-h", "--help"):
@@ -430,7 +497,8 @@ def main() -> None:
               "  (no args)  run the listener, menu bar, and dashboard in the foreground\n"
               "  set-key [openai|gemini]  store an API key in the macOS Keychain (default: openai)\n"
               "  doctor     check location, keys, microphone and frame\n"
-              "  backup     create a restore-ready database snapshot now\n\n"
+              "  backup     create a restore-ready database snapshot now\n"
+              "  publish [folder]  build the public, read-only site (and deploy it if configured)\n\n"
               "Run it forever (background service):\n"
               "  install    start at login and keep running (LaunchAgent)\n"
               "  uninstall  remove the background service\n"
@@ -445,8 +513,9 @@ def main() -> None:
     runtime = build_runtime(config)
     _start_listener(runtime, config)
     _start_health_watchdog(runtime)
-    _start_dashboard(runtime, config)
-    _start_scheduler(runtime)
+    site = _make_site_publisher(runtime, config)
+    _start_dashboard(runtime, config, site)
+    _start_scheduler(runtime, site)
 
     from birdframe.menubar import BirdframeMenuBar
     log.info("birdframe is listening. Mode: %s", config.post_mode)

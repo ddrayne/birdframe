@@ -814,6 +814,32 @@ class Store:
                 "hour_species": [_pack_time_species(bucket) for bucket in hour_voices],
                 "daily": daily, "heatmap": heatmap, "by_species": by_species}
 
+    def species_days_heard(self) -> dict[str, list[str]]:
+        """The days each species was heard, oldest first (from the
+        (common_name, ts) index alone) — the public seasons chart."""
+        days: dict[str, list[str]] = {}
+        for r in self._conn.execute(
+                "SELECT common_name, substr(ts,1,10) AS day FROM detections"
+                " GROUP BY common_name, day ORDER BY common_name, day").fetchall():
+            days.setdefault(r["common_name"], []).append(r["day"])
+        return days
+
+    def dawn_openers(self, after: str = "03:00") -> dict[str, int]:
+        """How many days each species was the first heard after `after` —
+        who opens the dawn chorus, ignoring the odd night-time call."""
+        rows = self._conn.execute(
+            "SELECT d.common_name, COUNT(DISTINCT d.day) AS n FROM detections d"
+            " JOIN (SELECT day, MIN(ts) AS ts FROM detections"
+            "       WHERE substr(ts,12,5) >= ? GROUP BY day) first"
+            " ON d.day = first.day AND d.ts = first.ts GROUP BY d.common_name",
+            (after,),
+        ).fetchall()
+        return {r["common_name"]: r["n"] for r in rows}
+
+    def latest_image_id(self) -> int | None:
+        row = self._conn.execute("SELECT MAX(id) AS id FROM images").fetchone()
+        return row["id"]
+
     def hour_histogram(self) -> list[int]:
         """All-time detection counts by hour of day (0–23) — the daily rhythm."""
         buckets = [0] * 24

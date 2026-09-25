@@ -141,6 +141,21 @@ function settingField(field) {
   return `<div class="field"><div><label for="setting-${attr(field.key)}">${esc(label)}</label><small>${note}</small></div><div>${control}</div></div>`;
 }
 
+function publicSiteCard(site) {
+  if (!site?.enabled) {
+    return `<section class="card card-pad" style="margin-top:18px"><div class="eyebrow">Public site</div>
+      <h2 style="font:500 24px var(--serif)">Share the journal publicly</h2>
+      <p class="muted">birdframe can build a read-only site of your paintings and birds, without audio, coordinates or doubtful birds, for any static host. Add <code>public_site_dir = "~/Sites/birdframe"</code> to config.toml and restart, or run <code>birdframe publish ~/Sites/birdframe</code>.</p></section>`;
+  }
+  const built = site.built_at ? `Last built ${esc(site.built_at.replace('T', ' ').slice(0, 16))} · ${site.paintings ?? 0} paintings, ${site.species ?? 0} birds` : 'Not built yet';
+  return `<section class="card card-pad" style="margin-top:18px"><div class="section-head" style="margin-top:0"><div><div class="eyebrow">Public site</div>
+      <h2>The journal, shared read-only</h2><p>Rebuilt after each new painting and hourly otherwise.</p></div></div>
+    <div class="button-row"><button type="button" class="btn secondary" id="publishSite">Publish now</button>
+      ${site.url ? `<a class="btn secondary" href="${attr(site.url)}" target="_blank" rel="noopener">Open the public site ↗</a>` : ''}
+      <span class="section-note" id="publishMessage">${site.running ? 'Publishing…' : site.error ? `Last attempt failed: ${esc(site.error)}` : built}</span></div>
+  </section>`;
+}
+
 export async function renderSettings(token) {
   const settings = await api('/api/settings');
   const health = await api('/api/health');
@@ -168,6 +183,8 @@ export async function renderSettings(token) {
         ${healthItem(health.backup_count > 0, 'Database backups', health.backup_count ? health.backup_count + ' snapshots · ' + backupMb + ' MB' : 'first snapshot pending')}
       </div>
     </section>
+
+    ${publicSiteCard(health.public_site)}
 
     <section class="card card-pad" style="margin-top:18px"><div class="section-head" style="margin-top:0"><div><div class="eyebrow">Recovery</div><h2>Restore-ready database snapshots</h2><p>birdframe makes one consistent SQLite backup every day and keeps it for the configured retention period.</p></div></div>
       <div class="button-row"><button type="button" class="btn secondary" id="backupNow">Back up now</button><span class="section-note" id="backupMessage">${health.backup_latest ? 'Latest: ' + esc(health.backup_latest) : 'No snapshot yet.'}</span></div>
@@ -205,6 +222,20 @@ export async function renderSettings(token) {
         : 'Nothing had changed.';
       toast(count ? 'Settings saved.' : 'Settings unchanged.');
     } catch (error) { message.textContent = error.message; }
+  });
+  document.querySelector('#publishSite')?.addEventListener('click', async event => {
+    const button = event.currentTarget, message = document.querySelector('#publishMessage');
+    button.disabled = true; message.textContent = 'Publishing…';
+    try {
+      await api('/api/public/publish', {method: 'POST'});
+      const poll = setInterval(async () => {
+        const site = await api('/api/public').catch(() => null);
+        if (!site || site.running) return;
+        clearInterval(poll); button.disabled = false;
+        message.textContent = site.error ? `Publishing failed: ${site.error}` : 'Published.';
+        if (!site.error) toast('Public site published.');
+      }, 1500);
+    } catch (error) { button.disabled = false; message.textContent = error.message; }
   });
   document.querySelector('#backupNow').addEventListener('click', async event => {
     const button = event.currentTarget, message = document.querySelector('#backupMessage');
