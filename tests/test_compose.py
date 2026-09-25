@@ -107,3 +107,14 @@ def test_eink_preview_uses_only_the_panels_six_blended_inks():
     assert printed.size == (120, 160)
     blended = {(0, 0, 0), (199, 200, 201), (227, 216, 43), (196, 43, 45), (37, 35, 158), (35, 157, 42)}
     assert {colour for _, colour in printed.getcolors(1000)} <= blended
+
+
+def test_caption_font_is_a_real_scalable_face():
+    """On a Pi there is no Georgia; a Linux serif (or Pillow's own scalable
+    face) must stand in, never the tiny fixed-size bitmap."""
+    from PIL import ImageFont
+
+    from birdframe.compose import _font
+    font = _font(34)
+    assert isinstance(font, ImageFont.FreeTypeFont)
+    assert font.size == 34

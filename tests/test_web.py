@@ -777,3 +777,18 @@ def test_public_site_endpoints_and_frame_flag(tmp_path):
     assert client.get("/api/history").json()["frame_enabled"] is False
     assert client.post("/api/settings", json={"place_name": "Leith"}).status_code == 200
     assert ctx.config.place_name == "Leith"
+
+
+def test_public_status_names_the_host_and_its_address(tmp_path):
+    _, ctx, client = _client(tmp_path)
+
+    class FakeSite:
+        status = {"built_at": None, "error": None, "running": False,
+                  "url": "https://window.pages.dev", "deployed_at": "2026-09-25T21:05:00"}
+    ctx.public_site = FakeSite()
+    ctx.config.cloudflare_project = "window"
+    body = client.get("/api/public").json()
+    assert body["host"] == "Cloudflare Pages" and body["url"] == "https://window.pages.dev"
+    assert body["deployed_at"] == "2026-09-25T21:05:00"
+    ctx.config.public_site_url = "https://birds.example.org"
+    assert client.get("/api/public").json()["url"] == "https://birds.example.org"

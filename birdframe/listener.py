@@ -218,6 +218,12 @@ class AudioListener:
         self._stop.set()
         self._restart_stream.set()
 
+    def join(self, timeout: float | None = None) -> None:
+        """Wait for capture to close the audio stream after stop()."""
+        thread = getattr(self, "_capture_thread", None)
+        if thread is not None:
+            thread.join(timeout)
+
     def _set_state(self, state: str, detail: str = "") -> None:
         with self._lock:
             self._state = state

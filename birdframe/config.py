@@ -55,6 +55,10 @@ DEFAULTS = {
     "public_site_url": "",         # where it is hosted, for link previews (optional)
     "public_site_title": "",       # "" = "The <place_name> Window"
     "public_deploy_command": "",   # run after each build; {dir} is the built folder
+    # Or publish to Cloudflare Pages (free); the API token is a stored key,
+    # never here: `birdframe set-key cloudflare`. See cloudflare.py.
+    "cloudflare_project": "",      # e.g. "edinburgh-window" → edinburgh-window.pages.dev
+    "cloudflare_account_id": "",   # the Account ID on your Cloudflare dashboard
 }
 
 
@@ -101,6 +105,8 @@ class Config:
     public_site_url: str
     public_site_title: str
     public_deploy_command: str
+    cloudflare_project: str
+    cloudflare_account_id: str
     path: Path = DEFAULT_CONFIG_PATH
 
     @classmethod
