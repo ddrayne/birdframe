@@ -24,8 +24,21 @@ function markNavigation(top) {
   document.querySelectorAll('[data-nav]').forEach(link => link.classList.toggle('active', link.dataset.nav === top));
 }
 
+// Going back (swipe or back button) returns to where you were in a long list,
+// instead of the top; following a link still starts a page at the top.
+const scrollMemory = new Map();
+let shownHash = location.hash;
+let followedLink = false;
+document.addEventListener('click', event => {
+  if (event.target.closest('a[href^="#"]')) followedLink = true;
+}, true);
+
 async function renderRoute() {
   stopPolling();
+  scrollMemory.set(shownHash, window.scrollY);
+  const restoreTo = followedLink ? null : scrollMemory.get(location.hash);
+  followedLink = false;
+  shownHash = location.hash;
   const route = parseRoute();
   const valid = ['today', 'journal', 'species', 'patterns', 'pictures', 'settings'];
   if (!valid.includes(route.top)) { location.replace('#today'); return; }
@@ -44,6 +57,7 @@ async function renderRoute() {
     if (token === state.routeToken) {
       initChartTooltips(document);
       document.querySelector('#app')?.focus({preventScroll: true});
+      if (restoreTo) window.scrollTo({top: restoreTo, behavior: 'instant'});
     }
   } catch (error) {
     if (token === state.routeToken) errorView(error, route.top === 'today' ? '#journal' : '#today');

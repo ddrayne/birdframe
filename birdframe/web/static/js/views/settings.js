@@ -3,9 +3,18 @@ import {api, app, esc, attr, ago, formBody, pageHeader, routeIsCurrent, toast, s
 const ENUMS = {
   post_mode: ['daily', 'live', 'manual'],
   style_mode: ['responsive', 'rotate', 'pinned'],
-  image_quality: ['low', 'medium', 'high'],
+  // xhigh and max exist only on the gpt-image-2.5 models; others fall back to high.
+  image_quality: ['low', 'medium', 'high', 'xhigh', 'max'],
   image_provider: ['openai', 'gemini'],
 };
+
+// Free text (new models appear often) with the current ones one tap away.
+const SUGGESTIONS = {
+  openai_model: ['gpt-image-2.5-sunburst', 'gpt-image-2.5-flare', 'gpt-image-2', 'gpt-image-1.5'],
+  gemini_model: ['gemini-3-pro-image', 'gemini-3.1-flash-image'],
+};
+
+const TIME_FIELDS = new Set(['live_window_start', 'live_window_end']);
 
 function healthItem(ok, label, value) {
   return `<div class="health-item soft-card"><b><i class="health-dot ${ok ? '' : 'bad'}"></i>${esc(label)}</b><span>${esc(value)}</span></div>`;
@@ -117,8 +126,11 @@ function settingField(field) {
     control = `<select id="setting-${attr(field.key)}" data-key="${attr(field.key)}">${ENUMS[field.key].map(value => `<option value="${attr(value)}" ${String(field.value) === value ? 'selected' : ''}>${esc(value)}</option>`).join('')}</select>`;
   } else if (field.key === 'post_times') {
     return scheduleEditor(field.value);
+  } else if (SUGGESTIONS[field.key]) {
+    control = `<input id="setting-${attr(field.key)}" type="text" data-key="${attr(field.key)}" value="${attr(field.value)}" list="options-${attr(field.key)}" autocapitalize="off" spellcheck="false">
+      <datalist id="options-${attr(field.key)}">${SUGGESTIONS[field.key].map(value => `<option value="${attr(value)}">`).join('')}</datalist>`;
   } else {
-    const type = typeof field.value === 'number' ? 'number' : field.key.includes('time') ? 'time' : 'text';
+    const type = typeof field.value === 'number' ? 'number' : TIME_FIELDS.has(field.key) ? 'time' : 'text';
     const step = typeof field.value === 'number' && !Number.isInteger(field.value) ? ' step="any"' : '';
     control = `<input id="setting-${attr(field.key)}" type="${type}" data-key="${attr(field.key)}" value="${attr(field.value)}"${step}>`;
   }
@@ -147,7 +159,7 @@ export async function renderSettings(token) {
         ${healthItem(!audio.restart_required, 'Audio watchdog', `${audio.stream_restarts || 0} reconnects · ${audio.automatic_unmutes || 0} mute repairs · ${signalLabel}`)}
         ${healthItem(!audio.restart_required, 'Detector flow', audio.last_audio_chunk_ago_s == null ? 'waiting for first chunk' : `last audio chunk ${ago(audio.last_audio_chunk_ago_s)}`)}
         ${healthItem(true, 'Last detection', ago(health.last_detection_ago_s))}
-        ${healthItem(health.openai_key_set, 'Image artist', health.openai_key_set ? 'paint model ready' : 'fallback poster mode')}
+        ${healthItem(health.openai_key_set, 'Image artist', health.openai_key_set ? `${health.image_model || 'paint model'} ready` : 'fallback poster mode')}
         ${healthItem(true, 'Local archive', `${archiveMb} MB`)}
         ${healthItem(health.backup_count > 0, 'Database backups', health.backup_count ? health.backup_count + ' snapshots · ' + backupMb + ' MB' : 'first snapshot pending')}
       </div>

@@ -76,7 +76,7 @@ export async function renderPatterns(token, params = new URLSearchParams()) {
     </div>
 
     <div class="dossier-grid" style="margin-top:18px">
-      <section class="card dossier-section"><h2>The 24-hour rhythm</h2><p>Hover an hour to meet the voices inside it.</p>${hourBars(data.hours, {speciesByHour: data.hour_species})}</section>
+      <section class="card dossier-section"><h2>The 24-hour rhythm</h2><p>Touch or hover an hour to meet the voices inside it.</p>${hourBars(data.hours, {speciesByHour: data.hour_species})}</section>
       <section class="card dossier-section"><h2>Unusual voices</h2><p>Lowest local plausibility in the selected view. Reliability remains visible alongside rarity.</p>${unusual(data)}</section>
     </div>
 
@@ -90,7 +90,7 @@ export async function renderPatterns(token, params = new URLSearchParams()) {
       <div id="soundscapeScore"></div>
     </section>
 
-    <section class="card dossier-section" style="margin-top:18px"><h2>Day × hour</h2><p>Hover a cell to see which species made that hour. Horizontal scrolling preserves all 24 hours on small screens.</p>${heatmap(data.heatmap)}</section>
+    <section class="card dossier-section" style="margin-top:18px"><h2>Day × hour</h2><p>Touch or hover a cell to see which species made that hour. Horizontal scrolling preserves all 24 hours on small screens.</p>${heatmap(data.heatmap)}</section>
 
     <section class="card card-pad" style="margin-top:18px">
       <div class="eyebrow">How to read this</div>
