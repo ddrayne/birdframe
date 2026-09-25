@@ -6,10 +6,12 @@ into a stylised AI painting — posted to a shared
 [Inky Frame](https://github.com/ddrayne/inky-frame) e-ink display and kept as
 your own growing bird census.
 
-It runs quietly in the background on a Mac: a menu-bar app plus a local web
-dashboard, with a continuous *audio → BirdNET → SQLite → gpt-image → frame*
+It runs quietly in the background on a Mac (a menu-bar app plus a local web
+dashboard) or on a Raspberry Pi (just the dashboard, which is made for your
+phone), with a continuous *audio → BirdNET → SQLite → gpt-image → frame*
 pipeline. Audio is analysed in memory and never written to disk (only short
-best-of clips per species are kept, so you can listen back).
+best-of clips per species are kept, so you can listen back). The Inky frame
+is optional, and the journal can be published as a public website.
 
 <p align="center">
   <img src="docs/screenshots/artwork.png" alt="A day's birds painted as an Edinburgh scene" width="440">
@@ -76,7 +78,8 @@ discarding stored detections.
 The dashboard is installable as a PWA and reachable from your phone on the same
 network.
 
-**Requirements:** macOS (Apple Silicon or Intel) and [Homebrew](https://brew.sh).
+**Requirements:** macOS (Apple Silicon or Intel) and [Homebrew](https://brew.sh),
+or a Raspberry Pi 4/5 with 64-bit Raspberry Pi OS ([below](#on-a-raspberry-pi)).
 Python 3.12 is fetched automatically by `uv` — you don't need it pre-installed.
 
 ## Install (one line)
@@ -136,6 +139,50 @@ changing signal level, last completed audio chunk, and automatic reconnects.
 Detection count is not used as an audio health signal—a silent garden is valid
 as long as fresh, changing samples continue to arrive.
 
+## On a Raspberry Pi
+
+birdframe also runs headless on Linux, which makes a Raspberry Pi with a USB
+microphone a good permanent listener. The same code runs on both; the Pi
+simply has no menu bar, so you use the dashboard from your phone.
+
+You need a **Raspberry Pi 5 or 4 (2 GB or more)** running 64-bit Raspberry Pi
+OS (Lite is fine) and a USB microphone. Then, on the Pi:
+
+```sh
+git clone https://github.com/ddrayne/birdframe && cd birdframe
+./install.sh
+```
+
+The installer adds PortAudio and a caption font with apt, installs `uv` (which
+fetches Python 3.12 for birdframe, whatever the system Python is), syncs the
+dependencies, offers to store your OpenAI key, runs `birdframe doctor`, and
+installs a **systemd user service** that starts at boot and restarts if it ever
+stops. Then open **http://&lt;your-pi&gt;.local:8355** on your phone and add it
+to your home screen.
+
+What's different from a Mac:
+
+- **Keys** — a Pi has no Keychain, so `uv run birdframe set-key` stores keys in
+  `~/.config/birdframe/secrets.env`, readable only by you (mode 600) and never
+  in `config.toml`. Environment variables still take precedence.
+- **The service** — `uv run birdframe install | status | restart | logs |
+  uninstall` manage `~/.config/systemd/user/birdframe.service`. If
+  `birdframe status` says it won't start at boot, run
+  `sudo loginctl enable-linger $USER` once.
+- **Logs** are in `~/.local/state/birdframe/birdframe.log`
+  (`uv run birdframe logs`). Notifications (a new bird, microphone trouble)
+  become log lines; the dashboard shows the same health.
+- **The microphone** — your user needs to be in the `audio` group (the Pi's
+  first user is). `arecord -l` lists devices; pick one under **Settings** if
+  the default isn't your USB mic.
+- **BirdNET** runs on the lightweight LiteRT runtime; no TensorFlow needed.
+- **Sharing a Pi with the Inky frame** — if the frame's own server runs on the
+  same Pi, point birdframe at it with `frame_url = "http://localhost:5000"`.
+
+If the model crashes at startup on a Pi 5, add `kernel=kernel8.img` to
+`/boot/firmware/config.txt` and reboot. Some native libraries still assume
+4 KB memory pages, and the Pi 5's default kernel uses 16 KB pages.
+
 ## A public edition of the journal
 
 birdframe can publish a read-only website of your paintings and birds that
@@ -146,7 +193,7 @@ when it sings, and a week-by-week chart of the season. **Frame mode**
 a picture frame without an Inky display.
 
 It is a static site: HTML, CSS, JSON and WebP images that any static host can
-serve (GitHub Pages, Cloudflare Pages, Netlify, a Raspberry Pi). Nothing on it
+serve (Cloudflare Pages, GitHub Pages, Netlify, a Raspberry Pi). Nothing on it
 can write back to birdframe, and it leaves out what shouldn't leave the house:
 coordinates, audio, raw detections, the frame's address, and doubtful
 identifications (only confirmed and probable birds appear).
@@ -156,19 +203,61 @@ uv run birdframe publish ~/Sites/birdframe      # build it once, then preview:
 python3 -m http.server --directory ~/Sites/birdframe 8356
 ```
 
-To keep it current, add to `~/.config/birdframe/config.toml` and restart:
+### Free hosting on Cloudflare Pages
+
+birdframe can publish straight to [Cloudflare Pages](https://pages.cloudflare.com),
+which hosts static sites free and doesn't limit visits:
+
+1. In a free Cloudflare account, open **My Profile → API Tokens → Create
+   Token → Create Custom Token**. Give it one permission,
+   **Account · Cloudflare Pages · Edit**, and copy the token. Copy your
+   **Account ID** too; it's on the Workers & Pages overview page.
+2. Store the token: `uv run birdframe set-key cloudflare`
+3. Add to `~/.config/birdframe/config.toml`:
+
+   ```toml
+   place_name = "Edinburgh"                  # names the place in prompts and on the site
+   cloudflare_project = "edinburgh-window"   # the site becomes edinburgh-window.pages.dev
+   cloudflare_account_id = "0123456789abcdef0123456789abcdef"
+   ```
+
+4. Install **Node.js 22 or newer**. Cloudflare's uploader, Wrangler, runs on it
+   and birdframe fetches Wrangler itself with `npx`.
+   - Mac: `brew install node`
+   - Raspberry Pi: `curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt install -y nodejs`
+5. Check the setup with `uv run birdframe doctor`, then run
+   `uv run birdframe publish`. The first publish creates the project and prints
+   its address. After that, restart birdframe and it keeps the site current.
+
+**When it uploads.** Each new painting goes up straight away. Other changes,
+such as more birds heard, go up at most every six hours. A restart doesn't
+trigger an upload, and after a failed upload birdframe waits half an hour
+before trying again. Wrangler sends only the files Cloudflare doesn't already
+have, so a typical update is the page plus one new painting.
+**Settings → Public site** shows when the site was last built and sent, and
+has a **Publish now** button.
+
+**Your own domain.** Add it in the Cloudflare dashboard under your project's
+**Custom domains** tab, then set `public_site_url = "https://birds.example.org"`
+so link previews use it.
+
+### Other hosts
+
+To publish somewhere else, build into a folder you choose and, optionally,
+run your own deploy command after each build:
 
 ```toml
-place_name = "Edinburgh"                 # names the place in prompts and on the site
 public_site_dir = "~/Sites/birdframe"    # rebuilt after each painting, and hourly
 public_site_url = "https://example.org"  # optional: for link previews
-public_deploy_command = "npx wrangler pages deploy {dir} --project-name=birdframe"
+public_deploy_command = "rsync -a --delete {dir}/ me@example.org:/var/www/birds/"
 ```
 
-The deploy command runs after each build with `{dir}` replaced by the folder;
-it is split like a shell command but never run through a shell. These settings
-live only in `config.toml`: the LAN dashboard can trigger **Publish now** but
-can't change where the site is written or how it's deployed.
+The deploy command runs with `{dir}` replaced by the folder. It is split like
+a shell command but never run through a shell, and it follows the same upload
+schedule as Cloudflare. The build includes a `_headers` file of caching rules
+that Cloudflare Pages and Netlify apply. All of these settings live only in
+`config.toml`: the LAN dashboard can trigger **Publish now**, but it can't
+change where the site is written or how it's deployed.
 
 **Without an Inky frame**: set `frame_url = ""`. Paintings are still made on
 schedule, archived and published; nothing is sent to a display.

@@ -4,11 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-**birdframe** — a macOS app that listens continuously to birds outside a window
+**birdframe** — an app that listens continuously to birds outside a window
 in Edinburgh (BirdNET), and each day paints the detected species with an image
 model (OpenAI gpt-image or Gemini, chosen by `image_provider` in config),
-posting a 1200×1600 picture to a shared Inky Frame e-ink display
-and archiving it locally. Design and the task-by-task implementation plan live
+posting a 1200×1600 picture to a shared Inky Frame e-ink display (optional)
+and archiving it locally, and optionally publishing a read-only public site.
+It runs on macOS (menu bar + dashboard) or headless on Linux, e.g. a
+Raspberry Pi (dashboard only). Design and the task-by-task implementation plan live
 in `docs/plans/2026-07-05-birdframe-*.md`.
 
 ## Commands
@@ -22,7 +24,10 @@ BIRDFRAME_SMOKE=1 uv run pytest tests/test_smoke.py -s   # opt-in real-model che
 uv run birdframe                    # run the app (menu bar + dashboard); grants mic access on first launch
 uv run birdframe set-key            # store the OpenAI key in the Keychain (hidden prompt)
 uv run birdframe set-key gemini     # same, for the Gemini key
-bash packaging/install.sh           # install the LaunchAgent to run forever
+uv run birdframe set-key cloudflare # the Cloudflare Pages token for the public site
+uv run birdframe publish            # build (and deploy, if configured) the public site now
+uv run birdframe install            # run forever: LaunchAgent on macOS, systemd user service on Linux
+./install.sh                        # one-line setup from a fresh clone (Mac or Raspberry Pi)
 ```
 
 There is no separate lint/typecheck step configured; pytest is the gate.
@@ -36,11 +41,18 @@ There is no separate lint/typecheck step configured; pytest is the gate.
   `birdnet.load(...)`, cached under `~/.cache`. First run is slow; Zenodo
   outages surface as `Failed to download ... Status code: 500` — that's their
   server, not the code.
-- **Secrets never touch disk.** `secrets.get_key(provider)` resolves each
-  provider's key from its env var first (`OPENAI_API_KEY` / `GEMINI_API_KEY`),
-  then the macOS Keychain. Users set them with `birdframe set-key [openai|gemini]`
-  (hidden `getpass` prompt → Keychain). Config TOML holds everything else.
-  Don't add a config field for keys. Narration (`narrator.py`) always needs the
+- **birdnet ≥ 1.1 needs TensorFlow for `"tf"` models by default**, and nothing
+  installs it (Pis never have it). `detector.model_options()` passes
+  `library="litert"` (ai-edge-litert, a birdnet dependency) when TensorFlow is
+  absent; don't drop it or the detector fails to load.
+- **Secrets never touch the config file or logs.** `secrets.get_key(provider)`
+  resolves each key from its env var first (`OPENAI_API_KEY` / `GEMINI_API_KEY`
+  / `CLOUDFLARE_API_TOKEN`), then the macOS Keychain on a Mac, or on Linux
+  `~/.config/birdframe/secrets.env` (created 0600, written atomically). Linux
+  deliberately skips `keyring`: a headless Pi has no keychain, and a desktop
+  keyring can block forever on an unlock prompt. Users set keys with
+  `birdframe set-key [openai|gemini|cloudflare]` (hidden `getpass` prompt).
+  Config TOML holds everything else. Don't add a config field for keys. Narration (`narrator.py`) always needs the
   OpenAI key, regardless of `image_provider`. Keychain items MUST be created via
   `birdframe set-key` (Python keyring), never the `security` CLI — an item
   created by `security` isn't on Python's ACL, so `keyring.get_password` blocks
@@ -48,8 +60,12 @@ There is no separate lint/typecheck step configured; pytest is the gate.
 
 ## Architecture
 
-Single process. `rumps` owns the macOS main thread (menu bar), which only
-displays state; the audio listener, BirdNET detector, scheduler
+Single process. On macOS `rumps` owns the main thread (menu bar), which only
+displays state; on Linux there is no menu bar and the main thread waits in
+`app._serve_headless` for SIGTERM, then releases the mic and exits with
+`os._exit(0)`. `host.py` holds the few other platform differences (log path,
+keep-awake, notifications) and `service.py` the service manager (launchd or a
+systemd user service). The audio listener, BirdNET detector, scheduler
 (`app._start_scheduler`, which also performs the nightly restart), watchdog and
 a `uvicorn`/FastAPI dashboard run on worker threads, all sharing one WAL-mode
 SQLite store. Never do slow work (renders, frame posts) on the AppKit thread.
@@ -127,8 +143,8 @@ hard-veto a species via the "not here" blocklist (`config.blocked_species`).
   list, all-time rhythm, CSV export.
 - **Narration** (`narrator.py`, `/api/narration`): one-line day story via
   `gpt-4.1-mini`, cached per day, template fallback.
-- **Health** (`/api/health`) + macOS notifications (`app._notify`): mic loss,
-  unreachable frame, life-list firsts.
+- **Health** (`/api/health`) + notifications (`host.notify`: macOS
+  notifications, log lines on Linux): mic loss, unreachable frame, life-list firsts.
 - **Icon/PWA** (`icon.py` renders the app icon; manifest + `sw.js`). The shell
   and ES modules are served `Cache-Control: no-cache` (modules are imported
   without version stamps); bump `?v=` in `index.html`/`sw.js` with UI changes.
@@ -136,7 +152,15 @@ hard-veto a species via the "not here" blocklist (`config.blocked_species`).
   a static, read-only edition built from aggregates only: confirmed/probable
   species, real paintings (no fallback posters), no audio, coordinates, raw
   detections or frame address. `SitePublisher` rebuilds it on its own thread
-  after new paintings and hourly; `public_*` settings are config-file only (the
+  after new paintings and hourly. Uploads (`public_deploy_command`, or
+  Cloudflare Pages via `cloudflare.py`) follow a stricter schedule: a new
+  painting goes up at once, other changes (the build's `fingerprint`) at most
+  every 6h, failures back off 30 min, and the last upload is persisted in
+  `public-site.json` so restarts and crash loops never re-upload. Cloudflare:
+  the project is looked up and created over the REST API (Wrangler won't
+  create one without a TTY), and the files go up with `npx wrangler@4 pages
+  deploy` (Node 22+). The token goes only in Wrangler's environment, never in
+  argv. `public_*`/`cloudflare_*` settings are config-file only (the
   LAN dashboard must never choose a folder to write or a command to run).
   Routes are plain anchors (`#birds`, `#p-<id>`, `#b-<slug>`, `#frame`).
   `frame_url = ""` disables the frame cleanly (`Publisher.enabled`).
@@ -144,7 +168,7 @@ hard-veto a species via the "not here" blocklist (`config.blocked_species`).
   `images/derived/`), never the 3 MB originals; `/api/image/{id}/eink` is the
   simulated frame print. State-changing requests labelled
   `Sec-Fetch-Site: cross-site` are refused (the dashboard is LAN-wide, unauthenticated).
-- CLI: `birdframe set-key | doctor | --help`.
+- CLI: `birdframe set-key | doctor | backup | publish | install | status | logs | --help`.
 
 ## Styles
 
@@ -158,5 +182,7 @@ style is just dropping in a new `.md` file — no code change.
 - Settings: `~/.config/birdframe/config.toml` (`config.DEFAULTS` is the schema;
   unknown keys are ignored, missing keys fall back to defaults).
 - Data: `~/.local/share/birdframe/` (SQLite + image archive).
-- Logs: `~/Library/Logs/birdframe.log`.
+- Logs: `~/Library/Logs/birdframe.log` on macOS;
+  `~/.local/state/birdframe/birdframe.log` on Linux.
+- Keys on Linux: `~/.config/birdframe/secrets.env` (0600).
 - Dashboard: http://localhost:8355.
