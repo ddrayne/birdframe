@@ -80,3 +80,12 @@ def test_retries_of_one_publish_share_an_idempotency_key():
     assert len(keys) == 2 and keys[0] == keys[1]
     pub.publish(b"PNGBYTES")
     assert keys[2] != keys[0]                 # a new publish is a new request
+
+
+def test_no_frame_configured_means_no_network_and_no_error():
+    calls = []
+    pub = Publisher("", hold_minutes=0, saturation=0.6,
+                    http_post=lambda *args: calls.append(args))
+    assert not pub.enabled
+    result = pub.publish(b"PNGBYTES")
+    assert result.status == "disabled" and calls == []

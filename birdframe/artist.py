@@ -23,8 +23,10 @@ class Artist:
                  archive_dir: Path, weather_fn, latitude: float, longitude: float,
                  style_mode: str = "rotate", pinned_style: str = "",
                  min_species_for_image: int = 1, max_paid_images_per_day: int = 1,
-                 min_species_confidence: float = 0.0, geo_lookup=None):
+                 min_species_confidence: float = 0.0, geo_lookup=None,
+                 place_name: str = "Edinburgh"):
         self.store = store
+        self.place_name = place_name
         self.styles = styles
         self.image_client = image_client
         self.archive_dir = Path(archive_dir)
@@ -157,7 +159,7 @@ class Artist:
                 return real
         profile = prepared["profile"]
         scene = build_scene(species_days, prepared["first_ever"],
-                            prepared["weather"], when, profile)
+                            prepared["weather"], when, profile, place=self.place_name)
         style = self._pick_style(style_name, when, profile)
         reason = style_choice_reason(
             style, self.styles, self.style_mode, when.toordinal(), self.pinned_style,

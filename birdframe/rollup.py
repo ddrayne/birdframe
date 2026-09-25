@@ -154,7 +154,7 @@ _PRECIPITATION = ("rain", "drizzle", "shower", "snow", "sleet")
 
 # Number-free phrases for the day's rhythm. Counts in a prompt tend to come
 # back as printed digits, or as that many birds.
-_CHARACTER = {
+CHARACTER_PHRASES = {
     "dawn-heavy": "most of its song came at dawn",
     "dusk-heavy": "its chorus gathered toward evening",
     "night-active": "voices carried on into the night",
@@ -178,11 +178,12 @@ def _a(phrase: str) -> str:
     return f"{'an' if phrase[:1].lower() in 'aeiou' else 'a'} {phrase}"
 
 
-def _setting(weather: str, season: str, tod: str) -> str:
+def _setting(weather: str, season: str, tod: str, place: str) -> str:
     moment = _a(f"{season} {tod}")
+    garden = _a(f"{place} garden")
     if any(word in weather for word in _PRECIPITATION):
-        return f"an Edinburgh garden on {moment} in {weather}"   # "... in light rain"
-    return f"an Edinburgh garden on {moment} under {weather} skies"
+        return f"{garden} on {moment} in {weather}"              # "... in light rain"
+    return f"{garden} on {moment} under {weather} skies"
 
 
 def _voice(s: SpeciesDay) -> str:
@@ -193,22 +194,24 @@ def _voice(s: SpeciesDay) -> str:
 
 def _character(profile: ArtProfile) -> str:
     skip = _ARCHETYPE_NOTES.get(profile.archetype)
-    notes = [_CHARACTER[tag] for tag in profile.tags if tag in _CHARACTER and tag != skip]
+    notes = [CHARACTER_PHRASES[tag] for tag in profile.tags
+             if tag in CHARACTER_PHRASES and tag != skip]
     return f"the day's character: {_a(profile.archetype.lower())}" + (
         f" — {', '.join(notes[:3])}" if notes else "")
 
 
 def build_scene(species: list[SpeciesDay], first_ever: set[str],
-                weather: str, when: datetime, profile: ArtProfile | None = None) -> str:
+                weather: str, when: datetime, profile: ArtProfile | None = None,
+                place: str = "Edinburgh") -> str:
     season = season_for(when)
     tod = _time_of_day(when)
     if not species:
-        return (f"a quiet Edinburgh garden on a {weather} {season} {tod}, "
+        return (f"a quiet {place} garden on a {weather} {season} {tod}, "
                 f"with no birds singing today")
     ranked = species  # already sorted by count desc from the store
     dawn = min(species, key=lambda s: s.first_heard)
     latest = max(species, key=lambda s: s.last_heard)
-    parts = [_setting(weather, season, tod)]
+    parts = [_setting(weather, season, tod, place)]
     lead = ranked[0]
     parts.append(f"the {_voice(lead)} singing prominently as the day's leading voice")
     others = [_voice(s) for s in ranked[1:6]]

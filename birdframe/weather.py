@@ -1,4 +1,4 @@
-"""Edinburgh weather in a few words, from the free Open-Meteo API."""
+"""The day's weather in a few words, from the free Open-Meteo API."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta
@@ -36,7 +36,8 @@ def describe_weather(lat: float, lon: float, when: datetime,
             "https://api.open-meteo.com/v1/forecast",
             {"latitude": lat, "longitude": lon, "start_date": day,
              "end_date": day, "daily": "weathercode",
-             "timezone": "Europe/London"},
+             # The coordinates' own timezone, so the day matches the listener's.
+             "timezone": "auto"},
         )
         code = data["daily"]["weathercode"][0]
         return _code_to_phrase(code)

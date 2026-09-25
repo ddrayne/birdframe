@@ -100,3 +100,11 @@ def test_prompt_asks_for_true_relative_sizes_and_frame_legibility():
     prompt = build_prompt(Style("plain", "Paint {scene}.", ""), "a wren")
     assert "sizes true to one another" in prompt
     assert "e-ink" in prompt
+
+
+def test_scene_names_the_configured_place():
+    robin = [SpeciesDay("European Robin", "Erithacus rubecula", 3, datetime(2026, 7, 5, 6),
+                        datetime(2026, 7, 5, 7), 6, 0.9)]
+    assert "a Boston garden" in build_scene(robin, set(), "clear", datetime(2026, 7, 5, 9),
+                                            place="Boston")
+    assert "an Edinburgh garden" in build_scene(robin, set(), "clear", datetime(2026, 7, 5, 9))

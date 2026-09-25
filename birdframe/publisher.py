@@ -14,7 +14,7 @@ log = logging.getLogger("birdframe")
 
 @dataclass
 class PublishResult:
-    status: str  # posted | held | unreachable
+    status: str  # posted | held | unreachable | disabled
     detail: str = ""
 
 
@@ -37,7 +37,15 @@ class Publisher:
         self.backoff = backoff
         self.timeout = timeout
 
+    @property
+    def enabled(self) -> bool:
+        return bool(self.frame_url)
+
     def publish(self, png_bytes: bytes, force: bool = False) -> PublishResult:
+        if not self.enabled:
+            # No frame configured: paintings are archived (and published to the
+            # public site, if set up) but never sent anywhere.
+            return PublishResult("disabled", "no frame is configured")
         url = f"{self.frame_url}/display"
         data = {"source": "birdframe", "hold_minutes": self.hold_minutes,
                 "saturation": self.saturation}

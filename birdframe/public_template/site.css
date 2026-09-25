@@ -1,0 +1,276 @@
+/* The public edition of a birdframe journal. Tokens follow the private
+   dashboard's palette so the two read as one family. */
+:root {
+  color-scheme: light;
+  --page: #eef2ec;
+  --surface: #fbfcf8;
+  --surface-soft: #f3f6f0;
+  --ink: #17231d;
+  --ink-soft: #4f6157;
+  --ink-faint: #6e7c72;
+  --line: #d4ddd2;
+  --forest: #245c48;
+  --forest-soft: #dcebe1;
+  --gold: #a8691f;
+  --gold-soft: #f3e4cf;
+  --shadow: 0 1px 2px rgb(23 35 29 / 6%), 0 18px 44px rgb(23 35 29 / 10%);
+  --display: "IM Fell English", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --serif: "Source Serif 4", "Iowan Old Style", Georgia, serif;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --gutter: max(16px, env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px));
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #10150f;
+    --surface: #181f19;
+    --surface-soft: #1e271f;
+    --ink: #edf2e9;
+    --ink-soft: #abb8aa;
+    --ink-faint: #8a978b;
+    --line: #303c31;
+    --forest: #7bb497;
+    --forest-soft: #21372a;
+    --gold: #e2a85c;
+    --gold-soft: #3c2f1e;
+    --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 18px 48px rgb(0 0 0 / 34%);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #10150f;
+  --surface: #181f19;
+  --surface-soft: #1e271f;
+  --ink: #edf2e9;
+  --ink-soft: #abb8aa;
+  --ink-faint: #8a978b;
+  --line: #303c31;
+  --forest: #7bb497;
+  --forest-soft: #21372a;
+  --gold: #e2a85c;
+  --gold-soft: #3c2f1e;
+  --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 18px 48px rgb(0 0 0 / 34%);
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  padding-inline: var(--gutter);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  background: var(--page);
+  color: var(--ink);
+  font: 400 17px/1.6 var(--serif);
+  font-optical-sizing: auto;
+}
+img { max-width: 100%; height: auto; display: block; }
+a { color: var(--forest); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+:focus-visible { outline: 3px solid var(--forest); outline-offset: 3px; border-radius: 3px; }
+[hidden] { display: none !important; }
+h1, h2, h3 { margin: 0; font-weight: 400; text-wrap: balance; }
+p { margin: 0; }
+
+.skip { position: absolute; left: var(--gutter); top: -60px; background: var(--ink); color: var(--page); padding: 8px 12px; }
+.skip:focus { top: 8px; z-index: 50; }
+
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.about { display: grid; gap: 10px; max-width: 40rem; }
+.about p:not(.label):not(.facts) { font-size: 18px; color: var(--ink-soft); }
+
+.label {
+  font: 600 11px/1.3 var(--sans);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+/* ── masthead ─────────────────────────────────────────────── */
+.masthead {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  /* Full bleed over the body's gutters; the content keeps the page's measure. */
+  margin-inline: calc(-1 * var(--gutter));
+  padding: calc(12px + env(safe-area-inset-top, 0px))
+           max(var(--gutter), calc((100% + 2 * var(--gutter) - 1120px) / 2)) 10px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px 22px;
+  background: color-mix(in srgb, var(--page) 92%, transparent);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+}
+.wordmark { color: var(--ink); text-decoration: none; font: 400 23px/1.1 var(--display); }
+.masthead nav { display: flex; gap: 20px; }
+.masthead nav a {
+  font: 600 12px/1 var(--sans);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  text-decoration: none;
+  padding: 8px 0;
+  border-bottom: 2px solid transparent;
+}
+.masthead nav a.active { color: var(--forest); border-color: var(--forest); }
+
+main { max-width: 1120px; margin: 0 auto; padding: 26px 0 56px; outline: none; }
+.page { display: grid; gap: 56px; }
+.page > * { min-width: 0; }
+
+/* ── the latest painting, hung like a print ──────────────── */
+.intro { display: grid; gap: 10px; max-width: 40rem; }
+.intro h1 { font: 400 clamp(38px, 9vw, 64px)/1 var(--display); letter-spacing: -.01em; }
+.intro p { color: var(--ink-soft); }
+.facts { display: flex; flex-wrap: wrap; gap: 4px 16px; font: 500 13px/1.5 var(--sans); color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.facts b { color: var(--ink); font-weight: 650; }
+
+.hero { display: grid; gap: 26px; align-items: start; }
+.print {
+  margin: 0;
+  padding: clamp(8px, 2.4vw, 16px);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  animation: hang .7s cubic-bezier(.2, .7, .2, 1) both;
+}
+.print img { width: 100%; height: auto; aspect-ratio: 3 / 4; object-fit: cover; background: var(--surface-soft); }
+@keyframes hang { from { transform: translateY(8px); opacity: .82; } }
+
+.museum-label { display: grid; gap: 14px; align-content: start; }
+.museum-label .when { font: 400 clamp(30px, 6vw, 40px)/1.05 var(--display); }
+.museum-label .style { font: italic 400 24px/1.2 var(--display); color: var(--forest); }
+.museum-label .meta { font: 500 13px/1.5 var(--sans); color: var(--ink-soft); }
+.museum-label .note { font-size: 18px; line-height: 1.55; max-width: 34rem; }
+.museum-label .note::before { content: "“"; }
+.museum-label .note::after { content: "”"; }
+.bird-line { display: flex; flex-wrap: wrap; gap: 4px 14px; font: 400 19px/1.4 var(--display); }
+.bird-line a { color: var(--ink); text-decoration-color: color-mix(in srgb, var(--forest) 45%, transparent); }
+.actions { display: flex; flex-wrap: wrap; gap: 10px 20px; font: 600 13px/1.4 var(--sans); }
+.actions a { text-decoration: none; }
+
+/* ── section heads ─────────────────────────────────────────── */
+.section { display: grid; gap: 18px; }
+.section-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 18px; border-top: 1px solid var(--line); padding-top: 16px; }
+.section-head h2 { font: 400 clamp(28px, 6vw, 38px)/1.1 var(--display); }
+.section-head a { font: 600 13px/1.4 var(--sans); text-decoration: none; }
+.section-intro { color: var(--ink-soft); max-width: 40rem; }
+
+/* ── field notes ─────────────────────────────────────────────── */
+.notes { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.note-item { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 4px 14px; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.note-item .clock { grid-row: span 3; width: 52px; height: 52px; }
+.note-item .name { font: 400 22px/1.2 var(--display); }
+.note-item .name a { color: var(--ink); text-decoration: none; }
+.note-item .text { font-size: 15px; color: var(--ink-soft); }
+.note-item.no-bird { grid-template-columns: minmax(0, 1fr); }
+
+/* ── paintings ───────────────────────────────────────────────── */
+.strip { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(132px, 40%); gap: 14px; overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 8px; }
+.strip > a { scroll-snap-align: start; }
+.gallery { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 14px; }
+.tile { display: grid; gap: 8px; color: var(--ink); text-decoration: none; }
+.tile img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; background: var(--surface-soft); border: 1px solid var(--line); }
+.tile .date { font: 400 18px/1.15 var(--display); }
+.tile .kind { font: 500 12px/1.35 var(--sans); color: var(--ink-soft); }
+.hung { color: var(--gold); }
+.month { display: grid; gap: 14px; }
+.month h3 { font: italic 400 22px/1.2 var(--display); color: var(--ink-soft); }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  font: 600 12px/1 var(--sans); color: var(--ink-soft); background: transparent;
+  border: 1px solid var(--line); border-radius: 999px; padding: 9px 13px; cursor: pointer;
+}
+.chip[aria-pressed="true"] { color: var(--surface); background: var(--forest); border-color: var(--forest); }
+
+.painting { display: grid; gap: 28px; }
+.pager { display: flex; justify-content: space-between; gap: 12px; font: 600 13px/1.4 var(--sans); border-top: 1px solid var(--line); padding-top: 14px; }
+.pager a { text-decoration: none; }
+.direction { border-top: 1px solid var(--line); padding-top: 14px; }
+.direction summary { cursor: pointer; font: 600 13px/1.4 var(--sans); color: var(--forest); }
+.direction pre { white-space: pre-wrap; margin: 12px 0 0; font: 400 14px/1.6 var(--serif); color: var(--ink-soft); max-width: 44rem; }
+.character { font-style: italic; color: var(--ink-soft); }
+
+/* ── birds ───────────────────────────────────────────────────── */
+.bird-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.bird-row { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 2px 16px; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--line); color: var(--ink); text-decoration: none; }
+.bird-row .clock { grid-row: span 3; width: 56px; height: 56px; }
+.bird-row .name { font: 400 23px/1.15 var(--display); }
+.bird-row .sci, .bird-head .sci { font-style: italic; color: var(--ink-soft); font-size: 15px; }
+.bird-row .when { font: 500 13px/1.45 var(--sans); color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.sorts { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.bird-head { display: grid; gap: 22px; align-items: center; }
+.bird-head .clock { width: min(68vw, 260px); height: auto; aspect-ratio: 1; justify-self: center; }
+.bird-head h1 { font: 400 clamp(40px, 10vw, 64px)/1 var(--display); }
+.bird-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 20px; margin: 0; }
+.bird-facts div { display: grid; gap: 4px; }
+.bird-facts dd { margin: 0; font: 400 20px/1.2 var(--display); }
+
+.clock .dial { fill: none; stroke: var(--line); stroke-width: 1; }
+.clock .petal { fill: var(--forest); }
+.clock .petal.peak { fill: var(--gold); }
+.clock .tick { stroke: var(--ink-faint); stroke-width: 1; }
+.clock text { fill: var(--ink-faint); font: 600 9px var(--sans); }
+
+/* ── seasons ─────────────────────────────────────────────────── */
+.phenology { overflow-x: auto; border-top: 1px solid var(--line); padding-top: 12px; }
+.phenology table { border-collapse: separate; border-spacing: 3px; font: 500 12px/1.2 var(--sans); }
+.phenology th { font-weight: 600; color: var(--ink-soft); text-align: left; white-space: nowrap; }
+.phenology th.bird { position: sticky; left: 0; z-index: 1; background: var(--page); padding-right: 10px; max-width: 42vw; overflow: hidden; text-overflow: ellipsis; }
+.phenology th.bird a { color: var(--ink); text-decoration: none; font: 400 16px/1.2 var(--display); }
+/* Month names hang from their first week without widening its column. */
+.phenology thead th { position: relative; height: 18px; padding: 0; }
+.phenology thead th span { position: absolute; left: 0; bottom: 5px; font: 600 10px/1 var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint); white-space: nowrap; }
+.phenology td { width: 14px; min-width: 14px; height: 14px; padding: 0; border-radius: 3px; background: var(--surface-soft); }
+.phenology td[data-days] { background: color-mix(in srgb, var(--forest) var(--fill), var(--surface-soft)); }
+.legend { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font: 500 12px/1.4 var(--sans); color: var(--ink-soft); }
+.legend i { width: 14px; height: 14px; border-radius: 3px; display: inline-block; }
+
+/* ── frame mode: any tablet becomes the frame ──────────────── */
+.frame-mode { position: fixed; inset: 0; z-index: 100; background: #0b0d0b; display: grid; place-items: center; padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); }
+.frame-mode img { max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; }
+.frame-mode .exit {
+  position: absolute; top: calc(14px + env(safe-area-inset-top, 0px)); right: 14px;
+  font: 600 12px/1 var(--sans); letter-spacing: .1em; text-transform: uppercase;
+  color: #d9e2da; background: rgb(255 255 255 / 10%); border: 1px solid rgb(255 255 255 / 22%);
+  border-radius: 999px; padding: 10px 14px; text-decoration: none; transition: opacity .6s;
+}
+.frame-mode.quiet .exit { opacity: 0; }
+
+/* ── colophon ─────────────────────────────────────────────────── */
+.colophon { max-width: 1120px; margin: 0 auto; padding: 22px 0 40px; border-top: 1px solid var(--line); display: grid; gap: 10px; font-size: 14px; color: var(--ink-soft); }
+.colophon p { max-width: 44rem; }
+.empty { padding: 28px 0; color: var(--ink-soft); font-style: italic; }
+
+@media (min-width: 700px) {
+  .notes { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 32px; }
+  .gallery { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .strip { grid-auto-columns: minmax(150px, 22%); }
+  .bird-facts { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@media (min-width: 900px) {
+  body { font-size: 18px; }
+  .hero { grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr); gap: 48px; }
+  .hero .museum-label { padding-top: 12px; position: sticky; top: 90px; }
+  .gallery { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .notes { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .bird-list { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 40px; }
+  .bird-head { grid-template-columns: 260px minmax(0, 1fr); }
+  .painting { grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr); align-items: start; }
+  .painting .pager, .painting .direction { grid-column: 1 / -1; }
+}
+
+@media (hover: hover) {
+  .tile:hover img { border-color: var(--forest); }
+  .bird-row:hover .name { color: var(--forest); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}

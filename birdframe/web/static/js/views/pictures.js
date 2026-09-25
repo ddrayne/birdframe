@@ -21,7 +21,7 @@ function tagList(tags = [], limit = 99) {
   return `<div class="art-tags">${tags.slice(0, limit).map(tag => `<span>${esc(nice(tag))}</span>`).join('')}</div>`;
 }
 
-function editionCard(image, styleMap) {
+function editionCard(image, styleMap, frameEnabled = true) {
   const day = image.source_day || image.generated_at.slice(0, 10);
   const species = image.species?.join(', ') || 'A quiet garden';
   const style = styleMap.get(image.style.replace(' (fallback)', ''));
@@ -39,7 +39,7 @@ function editionCard(image, styleMap) {
       ${profile ? `<p class="edition-archetype">${esc(profile.archetype)} · ${num(profile.species_count)} species</p>` : ''}
       <p class="edition-species">${esc(species)}</p>
       <div class="edition-actions">
-        <button type="button" class="text-link" data-send-image="${image.id}">Send to frame →</button>
+        ${frameEnabled ? `<button type="button" class="text-link" data-send-image="${image.id}">Send to frame →</button>` : ''}
         <a class="text-link" href="#pictures/reimagine?day=${attr(day)}">Reimagine →</a>
       </div>
       <details class="edition-notes">
@@ -83,7 +83,7 @@ async function renderEditions(token) {
     });
     document.querySelector('#editionResult').textContent = `${rows.length} ${rows.length === 1 ? 'edition' : 'editions'}`;
     document.querySelector('#editionGrid').innerHTML = rows.length
-      ? rows.map(image => editionCard(image, styleMap)).join('')
+      ? rows.map(image => editionCard(image, styleMap, history.frame_enabled !== false)).join('')
       : '<div class="empty">No editions match this view.</div>';
   };
   draw();

@@ -5,6 +5,7 @@ export const state = {
   caches: new Map(),
   todayTimer: null,
   poll: null,
+  frameEnabled: true,
 };
 
 // Archived pictures are 3 MB, 1200×1600 PNGs; every list asks the server for a
@@ -206,6 +207,7 @@ export async function sendImageToFrame(id, button) {
       button.disabled = false; button.textContent = original;
       if (status.publish === 'posted') toast('Picture accepted by the frame. The e-ink refresh takes about 30 seconds.');
       else if (status.publish === 'held') toast('The shared frame is currently held by someone else.');
+      else if (status.publish === 'disabled') toast('No frame is set up. Add its address under Settings, Frame.');
       else toast(`The frame could not be reached${status.detail ? `: ${status.detail}` : '.'}`);
     }, 1500);
   } catch (error) {
@@ -221,7 +223,7 @@ export function openLightbox(src, caption, imageAlt = '') {
   // Any archived image can go to the frame straight from the viewer.
   const send = document.querySelector('#lightboxSend');
   const archived = /^\/api\/image\/(\d+)(?:\?|$)/.exec(src);
-  send.hidden = !archived;
+  send.hidden = !archived || !state.frameEnabled;
   if (archived) send.dataset.sendImage = archived[1];
   // …and can be previewed as the e-ink panel will actually print it.
   const eink = document.querySelector('#lightboxEink');

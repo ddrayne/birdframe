@@ -1,8 +1,8 @@
 // birdframe service worker — offline shell so the app opens even when the
 // Mac is briefly unreachable. Live data still needs the server.
-const CACHE = 'birdframe-v7';
+const CACHE = 'birdframe-v8';
 const SHELL = ['/', '/icon-192.png', '/manifest.webmanifest',
-  '/static/app.css?v=5', '/static/js/app.js?v=5'];
+  '/static/app.css?v=6', '/static/js/app.js?v=6'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
