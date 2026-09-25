@@ -119,6 +119,19 @@ def create_app(ctx: AppContext) -> FastAPI:
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
     @app.middleware("http")
+    async def refuse_cross_site_writes(request: Request, call_next):
+        """Any web page open on a phone or the Mac could otherwise POST here
+        (a text/plain body skips the CORS preflight) and spend on paid renders,
+        purge a species' history or re-point the frame. Browsers label such
+        requests Sec-Fetch-Site: cross-site; the dashboard's own are
+        same-origin, and curl or the MCP server send no label at all."""
+        if (request.method not in ("GET", "HEAD", "OPTIONS")
+                and request.headers.get("sec-fetch-site", "same-origin")
+                not in ("same-origin", "none")):
+            return JSONResponse({"error": "cross-site request refused"}, status_code=403)
+        return await call_next(request)
+
+    @app.middleware("http")
     async def revalidate_shell(request: Request, call_next):
         """The ES modules are imported without version stamps, so without an
         explicit policy a phone may heuristically cache an old core.js next to

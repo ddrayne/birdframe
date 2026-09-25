@@ -732,3 +732,17 @@ def test_eink_preview_endpoint_caches_per_saturation(tmp_path):
     derived = sorted(p.name for p in (tmp_path / "images" / "derived").iterdir())
     assert derived == ["edition-eink-0.60.png", "edition-eink-0.75.png"]
     assert client.get("/api/image/999/eink").status_code == 404
+
+
+def test_cross_site_pages_cannot_spend_or_delete(tmp_path):
+    _, ctx, client = _client(tmp_path)
+    for path, body in [("/api/post-now", None), ("/api/block", {"name": "European Robin"}),
+                       ("/api/settings", {"post_mode": "manual"})]:
+        resp = client.post(path, json=body, headers={"Sec-Fetch-Site": "cross-site"})
+        assert resp.status_code == 403, path
+    assert ctx.artist.calls == 0 and ctx.config.post_mode == "daily"
+    assert client.get("/api/today", headers={"Sec-Fetch-Site": "cross-site"}).status_code == 200
+    same = client.post("/api/settings", json={"post_mode": "manual"},
+                       headers={"Sec-Fetch-Site": "same-origin"})
+    assert same.status_code == 200                       # the dashboard itself
+    assert client.post("/api/settings", json={"post_mode": "daily"}).status_code == 200  # curl
