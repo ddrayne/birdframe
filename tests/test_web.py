@@ -746,3 +746,14 @@ def test_cross_site_pages_cannot_spend_or_delete(tmp_path):
                        headers={"Sec-Fetch-Site": "same-origin"})
     assert same.status_code == 200                       # the dashboard itself
     assert client.post("/api/settings", json={"post_mode": "daily"}).status_code == 200  # curl
+
+
+def test_saving_the_whole_form_reports_only_what_changed(tmp_path):
+    _, ctx, client = _client(tmp_path)
+    form = client.get("/api/settings").json()
+    body = {f["key"]: f["value"] for g in form["groups"] for f in g["fields"]}
+    unchanged = client.post("/api/settings", json=body).json()
+    assert unchanged == {"saved": [], "restart_required": []}
+    body["latitude"] = 55.9
+    changed = client.post("/api/settings", json=body).json()
+    assert changed == {"saved": ["latitude"], "restart_required": ["latitude"]}
