@@ -195,8 +195,11 @@ export async function renderSettings(token) {
     message.textContent = 'Saving…';
     try {
       const result = await api('/api/settings', formBody(body));
-      message.textContent = `Saved ${result.saved.length} settings${result.restart_required?.length ? ` · restart needed for ${result.restart_required.join(', ')}` : ''}.`;
-      toast('Settings saved.');
+      const count = result.saved.length;
+      message.textContent = count
+        ? `Saved ${count} ${count === 1 ? 'setting' : 'settings'}${result.restart_required?.length ? ` · restart needed for ${result.restart_required.join(', ').replaceAll('_', ' ')}` : ''}.`
+        : 'Nothing had changed.';
+      toast(count ? 'Settings saved.' : 'Settings unchanged.');
     } catch (error) { message.textContent = error.message; }
   });
   document.querySelector('#backupNow').addEventListener('click', async event => {

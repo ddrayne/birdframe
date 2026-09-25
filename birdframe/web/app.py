@@ -1244,10 +1244,12 @@ def create_app(ctx: AppContext) -> FastAPI:
             # partial apply would change live behaviour without being saved.
             return JSONResponse({"error": "invalid settings", "fields": errors},
                                 status_code=400)
+        # The form posts every field; report (and flag for restart) only the
+        # ones that actually changed.
+        saved = [key for key, value in updates.items() if getattr(cfg, key) != value]
         for key, value in updates.items():
             setattr(cfg, key, value)
-        saved = list(updates)
-        restart = [key for key in updates if key in RESTART_REQUIRED]
+        restart = [key for key in saved if key in RESTART_REQUIRED]
         cfg.save()
         if ctx.apply_settings:
             ctx.apply_settings()   # push live-applicable changes onto running objects
