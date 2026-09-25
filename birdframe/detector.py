@@ -93,6 +93,19 @@ def _rows_to_records(result) -> list[tuple[str, float, float | None, float | Non
     ]
 
 
+def model_options(find_spec=None) -> dict:
+    """How to run BirdNET's .tflite models here. birdnet 1.1+ runs them on
+    TensorFlow's interpreter by default, but a plain install (and every
+    Raspberry Pi) has only the lightweight LiteRT runtime, which birdnet
+    installs itself on Linux and Apple silicon. Prefer TensorFlow when present,
+    so an existing setup keeps behaving exactly as before."""
+    if find_spec is None:
+        from importlib.util import find_spec
+    if find_spec("tensorflow") is None and find_spec("ai_edge_litert") is not None:
+        return {"library": "litert"}
+    return {}
+
+
 class Detector:
     def __init__(self, latitude: float, longitude: float, threshold: float,
                  geo_floor: float, when: datetime | None = None,
@@ -100,8 +113,9 @@ class Detector:
         import birdnet
         self.threshold = threshold
         self.blocklist = set(blocklist or ())
-        self._acoustic = birdnet.load("acoustic", "2.4", "tf")
-        self._geo = birdnet.load("geo", "2.4", "tf")
+        options = model_options()
+        self._acoustic = birdnet.load("acoustic", "2.4", "tf", **options)
+        self._geo = birdnet.load("geo", "2.4", "tf", **options)
         self.sample_rate = self._acoustic.get_sample_rate()
         self._session = None
         self.whitelist = self._build_whitelist(latitude, longitude, geo_floor,
