@@ -9,6 +9,13 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 FRAME_W, FRAME_H = 1200, 1600
 CAPTION_H = 100
 ART_H = FRAME_H - CAPTION_H  # 1500
+PAPER = (250, 248, 242)
+# The frame dithers onto six inks whose "white" is a light grey, so any grey
+# text comes out as a speckle of black and white dots. Captions use pure black.
+INK = (0, 0, 0)
+# A render within this fraction of the art area's shape fills it (a few pixels
+# are trimmed); anything further off is fitted whole, never cropped.
+FILL_TOLERANCE = 0.03
 
 
 def _font(size: int):
@@ -19,44 +26,59 @@ def _font(size: int):
             return ImageFont.truetype(path, size)
         except OSError:
             continue
-    return ImageFont.load_default()
+    # Pillow's bundled font scales too; without a size it is a tiny bitmap.
+    return ImageFont.load_default(size)
 
 
-def _fit_contain(img: Image.Image, w: int, h: int) -> Image.Image:
-    """Scale to fit *inside* w×h preserving aspect ratio — never crop, so no
-    bird or label is lost. Any leftover space becomes a border."""
+def _fit_art(img: Image.Image, w: int, h: int) -> Image.Image:
+    """Fill w×h when the render is (nearly) that shape, e.g. a native 4:5
+    render; otherwise scale to fit *inside* w×h so no bird at an edge is lost
+    (a 2:3 render is letterboxed). Small renders are scaled up, not centred
+    in a wide border."""
     img = img.convert("RGB")
-    img.thumbnail((w, h), Image.LANCZOS)
-    return img
+    if abs(img.width / img.height - w / h) <= FILL_TOLERANCE * (w / h):
+        return ImageOps.fit(img, (w, h), Image.LANCZOS)
+    return ImageOps.contain(img, (w, h), Image.LANCZOS)
+
+
+def _names_line(draw: ImageDraw.ImageDraw, species: list[str], font, width: int) -> str:
+    """As many whole names as fit on the line, then "+ N more"."""
+    for shown in range(len(species), 0, -1):
+        rest = len(species) - shown
+        line = ", ".join(species[:shown]) + (f" + {rest} more" if rest else "")
+        if draw.textlength(line, font=font) <= width:
+            return line
+    return _truncate(", ".join(species), 90)
 
 
 def compose_final(art_bytes: bytes, date: datetime, species: list[str],
                   label: str = "") -> bytes:
-    art = _fit_contain(Image.open(io.BytesIO(art_bytes)), FRAME_W, ART_H)
-    canvas = Image.new("RGB", (FRAME_W, FRAME_H), (250, 248, 242))
-    # Centre the whole picture in the art area (letterboxed, never cropped).
+    art = _fit_art(Image.open(io.BytesIO(art_bytes)), FRAME_W, ART_H)
+    canvas = Image.new("RGB", (FRAME_W, FRAME_H), PAPER)
+    # Centre the picture in the art area (only a mismatched shape leaves a border).
     canvas.paste(art, ((FRAME_W - art.width) // 2, (ART_H - art.height) // 2))
     draw = ImageDraw.Draw(canvas)
     date_str = _caption_date(date, label)
-    draw.text((30, ART_H + 18), date_str, fill=(30, 30, 30), font=_font(34))
-    names = ", ".join(species) if species else "a quiet day — no birds detected"
-    names = _truncate(names, 90)
-    draw.text((30, ART_H + 58), names, fill=(70, 70, 70), font=_font(24))
+    draw.text((30, ART_H + 18), date_str, fill=INK, font=_font(34))
+    names_font = _font(24)
+    names = (_names_line(draw, species, names_font, FRAME_W - 60) if species
+             else "a quiet day — no birds detected")
+    draw.text((30, ART_H + 58), names, fill=INK, font=names_font)
     out = io.BytesIO()
     canvas.save(out, format="PNG")
     return out.getvalue()
 
 
 def fallback_poster(date: datetime, species: list[str], label: str = "") -> bytes:
-    canvas = Image.new("RGB", (FRAME_W, FRAME_H), (247, 244, 236))
+    canvas = Image.new("RGB", (FRAME_W, FRAME_H), PAPER)
     draw = ImageDraw.Draw(canvas)
-    draw.text((60, 80), "Birds heard today", fill=(30, 30, 30), font=_font(64))
-    draw.text((60, 170), _caption_date(date, label), fill=(90, 90, 90), font=_font(36))
+    draw.text((60, 80), "Birds heard today", fill=INK, font=_font(64))
+    draw.text((60, 170), _caption_date(date, label), fill=INK, font=_font(36))
     y = 300
     if not species:
-        draw.text((60, y), "A quiet day — none detected.", fill=(60, 60, 60), font=_font(40))
+        draw.text((60, y), "A quiet day — none detected.", fill=INK, font=_font(40))
     for name in species[:20]:
-        draw.text((60, y), f"·  {name}", fill=(40, 40, 40), font=_font(44))
+        draw.text((60, y), f"·  {name}", fill=INK, font=_font(44))
         y += 62
     out = io.BytesIO()
     canvas.save(out, format="PNG")

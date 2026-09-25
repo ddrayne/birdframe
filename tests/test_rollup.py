@@ -65,3 +65,38 @@ def test_art_profile_turns_rhythm_into_an_explainable_fingerprint():
                         datetime(2026, 4, 12, 21), profile)
     assert "visual rhythm" in scene
     assert "never into a literal number" in scene
+
+
+def _named(name, sci, count, first_h, last_h):
+    return SpeciesDay(name, sci, count, datetime(2026, 9, 24, first_h),
+                      datetime(2026, 9, 24, last_h), first_h, 0.9)
+
+
+def test_scene_carries_no_numbers_for_the_painter_to_letter_or_count():
+    import re
+    species = [_named("European Robin", "Erithacus rubecula", 312, 5, 21),
+               _named("Eurasian Blackbird", "Turdus merula", 120, 4, 20),
+               _named("Eurasian Wren", "Troglodytes troglodytes", 81, 6, 19)]
+    hours = [0] * 24
+    hours[4:10] = [20, 60, 90, 70, 40, 30]
+    when = datetime(2026, 9, 24, 21)
+    profile = build_art_profile(species, hours, set(), "light rain", when)
+    scene = build_scene(species, set(), "light rain", when, profile)
+    assert not re.search(r"\d", scene)
+    assert "European Robin (Erithacus rubecula)" in scene       # species pinned down
+    assert "an autumn dusk in light rain" in scene
+    assert "a dawn chorus" in scene
+
+
+def test_scene_weather_reads_naturally_for_sky_and_precipitation():
+    robin = [_named("European Robin", "Erithacus rubecula", 3, 6, 7)]
+    assert "under partly cloudy skies" in build_scene(
+        robin, set(), "partly cloudy", datetime(2026, 7, 5, 10))
+    assert "in heavy drizzle" in build_scene(
+        robin, set(), "heavy drizzle", datetime(2026, 7, 5, 10))
+
+
+def test_prompt_asks_for_true_relative_sizes_and_frame_legibility():
+    prompt = build_prompt(Style("plain", "Paint {scene}.", ""), "a wren")
+    assert "sizes true to one another" in prompt
+    assert "e-ink" in prompt

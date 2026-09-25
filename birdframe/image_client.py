@@ -16,13 +16,23 @@ class NoImageError(RuntimeError):
 
 
 class OpenAIImageClient:
-    SIZE = "1024x1536"  # portrait; composed to 1200x1600 downstream
+    # gpt-image-1.x only offers fixed sizes; this 2:3 portrait is letterboxed
+    # into the frame's 4:5 art area downstream.
+    SIZE = "1024x1536"
+    # gpt-image-2 and later take any WIDTHxHEIGHT divisible by 16: ask for the
+    # frame's own 1200x1500 art area (4px of height is trimmed when composing).
+    NATIVE_SIZE = "1200x1504"
+    # Tiers above "high" exist only on the gpt-image-2.5 models.
+    EXTRA_QUALITIES = ("xhigh", "max")
 
     def __init__(self, api_key: str, model: str = "gpt-image-2",
                  quality: str = "high", sdk=None, max_retries: int = 3,
                  backoff: float = 2.0, timeout: float = 300.0):
         self.model = model
+        if quality in self.EXTRA_QUALITIES and not model.startswith("gpt-image-2.5"):
+            quality = "high"   # the best this model accepts, rather than a 400
         self.quality = quality
+        self.size = self.NATIVE_SIZE if model.startswith("gpt-image-2") else self.SIZE
         self.max_retries = max_retries
         self.backoff = backoff
         if sdk is not None:
@@ -48,7 +58,7 @@ class OpenAIImageClient:
         for attempt in range(self.max_retries):
             try:
                 resp = self._client.images.generate(
-                    model=self.model, prompt=prompt, size=self.SIZE,
+                    model=self.model, prompt=prompt, size=self.size,
                     quality=self.quality, n=1,
                 )
                 # A 200 that we can't turn into bytes is a bug, not a transient
@@ -71,7 +81,9 @@ class GeminiImageClient:
                  quality: str = "high", sdk=None, max_retries: int = 3,
                  backoff: float = 2.0, timeout: float = 300.0):
         self.model = model
-        self.image_size = "2K" if quality == "high" else "1K"
+        # 2K comfortably covers the 1200x1500 art area; 4K would cost more for
+        # detail the e-ink frame can't show.
+        self.image_size = "2K" if quality in ("high", "xhigh", "max") else "1K"
         self.max_retries = max_retries
         self.backoff = backoff
         if sdk is not None:
