@@ -348,3 +348,55 @@ def test_real_posted_on_day_excludes_fallbacks_and_unposted(tmp_path):
     assert s.real_posted_on_day(day) is False       # generated but never posted
     s.mark_posted(real, datetime(2026, 7, 5, 12, 1))
     assert s.real_posted_on_day(day) is True
+
+
+def test_timestamp_index_serves_the_live_feed_without_sorting(tmp_path):
+    s = Store(tmp_path / "db.sqlite")
+    plan = " ".join(row[3] for row in s._conn.execute(
+        "EXPLAIN QUERY PLAN SELECT id FROM detections WHERE confidence >= 0"
+        " ORDER BY ts DESC, id DESC LIMIT 40"))
+    assert "idx_det_ts" in plan
+    assert "TEMP B-TREE" not in plan
+
+
+def test_first_ever_on_day_counts_only_the_debut_day(tmp_path):
+    s = Store(tmp_path / "db.sqlite")
+    s.add_detection(Detection(datetime(2026, 7, 5, 6), "Erithacus rubecula", "European Robin", 0.9))
+    s.add_detection(Detection(datetime(2026, 7, 6, 6), "Erithacus rubecula", "European Robin", 0.9))
+    s.add_detection(Detection(datetime(2026, 7, 6, 7), "Turdus merula", "Eurasian Blackbird", 0.8))
+    assert s.first_ever_on_day(datetime(2026, 7, 5, 12)) == {"European Robin"}
+    assert s.first_ever_on_day(datetime(2026, 7, 6, 12)) == {"Eurasian Blackbird"}
+    assert s.first_ever_on_day(datetime(2026, 7, 7, 12)) == set()
+
+
+def test_hour_histogram_counts_every_detection_by_hour(tmp_path):
+    s = Store(tmp_path / "db.sqlite")
+    for day, hour in [(5, 5), (5, 5), (6, 5), (6, 23), (7, 0)]:
+        s.add_detection(Detection(datetime(2026, 7, day, hour, 30),
+                                  "Erithacus rubecula", "European Robin", 0.9))
+    hours = s.hour_histogram()
+    assert len(hours) == 24
+    assert hours[5] == 3 and hours[23] == 1 and hours[0] == 1 and sum(hours) == 5
+
+
+def test_day_probes_for_existence_and_journal_neighbours(tmp_path):
+    s = Store(tmp_path / "db.sqlite")
+    for day in (3, 5, 9):
+        s.add_detection(Detection(datetime(2026, 7, day, 6), "Erithacus rubecula",
+                                  "European Robin", 0.9))
+    assert s.has_day("2026-07-05") and not s.has_day("2026-07-04")
+    assert s.day_neighbours("2026-07-05") == ("2026-07-03", "2026-07-09")
+    assert s.day_neighbours("2026-07-03") == (None, "2026-07-05")
+    assert s.day_neighbours("2026-07-09") == ("2026-07-05", None)
+
+
+def test_species_companions_respect_the_date_range(tmp_path):
+    s = Store(tmp_path / "db.sqlite")
+    robin, wren = ("Erithacus rubecula", "European Robin"), ("Troglodytes troglodytes", "Eurasian Wren")
+    s.add_detection(Detection(datetime(2026, 7, 5, 6, 1), *robin, 0.9))
+    s.add_detection(Detection(datetime(2026, 7, 5, 6, 14), *wren, 0.9))    # same 06:00 bucket
+    s.add_detection(Detection(datetime(2026, 7, 6, 6, 1), *robin, 0.9))
+    s.add_detection(Detection(datetime(2026, 7, 6, 6, 16), *wren, 0.9))    # next bucket: not shared
+    everything = s.species_dossier("European Robin")["companions"]
+    assert [(c["common_name"], c["shared_windows"]) for c in everything] == [("Eurasian Wren", 1)]
+    assert s.species_dossier("European Robin", start_day="2026-07-06")["companions"] == []
