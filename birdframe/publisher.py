@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Callable
 
@@ -17,11 +18,11 @@ class PublishResult:
     detail: str = ""
 
 
-def _default_post(url, files, data, timeout):
+def _default_post(url, files, data, timeout, headers=None):
     # Fail fast if the frame can't be reached (unreachable/mDNS), but allow a
     # long read — the Pi can take ~30s to answer while refreshing the e-ink.
     t = httpx.Timeout(connect=6.0, read=timeout, write=timeout, pool=timeout)
-    return httpx.post(url, files=files, data=data, timeout=t)
+    return httpx.post(url, files=files, data=data, headers=headers, timeout=t)
 
 
 class Publisher:
@@ -43,11 +44,16 @@ class Publisher:
         if force:
             # Explicit user action → override any hold another source placed.
             data["force"] = "1"
+        # Every attempt of this publish carries the same key, so when the frame
+        # accepted an upload but the reply was lost, the retry is recognised
+        # (the frame's /display honours Idempotency-Key) instead of queueing
+        # and redrawing the same picture twice.
+        headers = {"Idempotency-Key": f"birdframe-{uuid.uuid4().hex}"}
         last = ""
         for attempt in range(self.max_retries):
             try:
                 files = {"file": ("birdframe.png", png_bytes, "image/png")}
-                resp = self.http_post(url, files, data, self.timeout)
+                resp = self.http_post(url, files, data, self.timeout, headers)
                 if resp.status_code in (200, 202):
                     return PublishResult("posted")
                 if resp.status_code == 409:

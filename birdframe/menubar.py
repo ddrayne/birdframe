@@ -27,16 +27,11 @@ class BirdframeMenuBar(rumps.App):
         self._timer.start()
 
     def _tick(self, _):
+        # Display only: posting and the nightly restart run on the scheduler
+        # thread (app._start_scheduler), so a slow render never freezes the menu.
         try:
-            import datetime as _dt
-            import os as _os
             listener = getattr(self.runtime, "listener", None)
             audio_health = listener.health_snapshot() if listener else None
-            if self.runtime.should_restart_for_freshness(_dt.datetime.now()):
-                # A clean daily restart re-resolves the frame's mDNS name and
-                # bounds any slow resource creep. The LaunchAgent brings it back.
-                _os._exit(0)
-            self.runtime.tick()
             species = self.runtime.species_today()
             n = len(species)
             trouble = (audio_health is not None and
