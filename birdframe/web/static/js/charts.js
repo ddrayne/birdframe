@@ -90,8 +90,9 @@ export function areaChart(rows, valueKey = 'detections', {height = 220, label = 
   const dots = pts.map((p, i) => `<circle cx="${p.x}" cy="${p.y}" r="3.3" fill="var(--forest)">
     <title>${esc(dateLabel(rows[i].day, 'short'))}: ${num(p.value)} ${esc(valueKey)}</title></circle>`).join('');
   const last = rows.length - 1;
-  // Regular ticks, plus the final day — unless a tick already sits beside it.
-  const labels = rows.map((row, i) => (i % labelEvery === 0 && (i === last || last - i >= labelEvery / 2)) || i === last
+  // Regular ticks, plus the final day; a tick closer than one full interval
+  // to the final label is dropped so the two can't overlap on a phone.
+  const labels = rows.map((row, i) => (i % labelEvery === 0 && last - i >= labelEvery) || i === last
     ? `<text x="${pts[i].x}" y="${height - 7}" text-anchor="middle">${esc(row.day.slice(5))}</text>` : '').join('');
   return `<div class="chart" role="img" aria-label="${esc(label)}"><svg viewBox="0 0 ${width} ${height}">
     ${yTicks}<path class="area" d="${area}"></path><path class="line" d="${path}"></path>${dots}${labels}
