@@ -719,3 +719,16 @@ def test_settings_refuse_values_the_scheduler_cannot_read(tmp_path):
     assert ok.status_code == 200
     assert ctx.config.live_window_start == "07:30"       # normalised for the scheduler
     assert ctx.config.image_quality == "xhigh"
+
+
+def test_eink_preview_endpoint_caches_per_saturation(tmp_path):
+    store, ctx, client = _client(tmp_path)
+    image_id = _archived_png(store, tmp_path)
+    first = client.get(f"/api/image/{image_id}/eink")
+    assert first.status_code == 200 and first.headers["content-type"] == "image/png"
+    assert first.headers["cache-control"] == "no-cache"
+    ctx.config.frame_saturation = 0.75
+    client.get(f"/api/image/{image_id}/eink")
+    derived = sorted(p.name for p in (tmp_path / "images" / "derived").iterdir())
+    assert derived == ["edition-eink-0.60.png", "edition-eink-0.75.png"]
+    assert client.get("/api/image/999/eink").status_code == 404

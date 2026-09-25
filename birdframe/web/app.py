@@ -977,6 +977,20 @@ def create_app(ctx: AppContext) -> FastAPI:
                                lambda data: thumbnail_jpeg(data, width))
         return FileResponse(thumb, media_type="image/jpeg", headers=IMAGE_CACHE)
 
+    @app.get("/api/image/{image_id}/eink")
+    def image_eink(image_id: int):
+        """A simulation of the picture as the e-ink frame will print it."""
+        rec = ctx.store.get_image(image_id)
+        if rec is None or not Path(rec.path).exists():
+            return JSONResponse({"error": "no such image"}, status_code=404)
+        from birdframe.compose import eink_preview
+        saturation = float(getattr(ctx.config, "frame_saturation", 0.6))
+        printed = _derived_image(Path(rec.path), f"eink-{saturation:.2f}.png",
+                                 lambda data: eink_preview(data, saturation))
+        # Revalidate: the file behind this URL changes with the saturation setting.
+        return FileResponse(printed, media_type="image/png",
+                            headers={"Cache-Control": "no-cache"})
+
     @app.post("/api/post-now")
     def post_now():
         # Explicit user action → force a real (paid) image and override any hold.
