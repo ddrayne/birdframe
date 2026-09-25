@@ -128,6 +128,10 @@ class Store:
                 "CREATE INDEX IF NOT EXISTS idx_det_day_species"
                 " ON detections(day, common_name)"
             )
+            # The live feed, the rolling capture window and "last heard" all
+            # order or range-scan by timestamp. Without this, every 5-second
+            # dashboard poll sorted the whole table under the store lock.
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_det_ts ON detections(ts)")
             # Best audio clip per species per day (a recording you can listen to).
             self._conn.execute(
                 """CREATE TABLE IF NOT EXISTS clips (
@@ -201,7 +205,10 @@ class Store:
         dropped from what we report — without deleting the raw data."""
         agg: dict[str, dict] = {}
         for r in rows:
-            ts = datetime.strptime(r["ts"], _ISO)
+            # ISO timestamps sort as text, so only each species' first and last
+            # are parsed — strptime per row dominated busy-day rollups.
+            ts = r["ts"]
+            hour = int(ts[11:13])
             a = agg.setdefault(r["common_name"], {
                 "scientific_name": r["scientific_name"], "count": 0,
                 "first": ts, "last": ts, "best": 0.0, "hours": {},
@@ -210,11 +217,12 @@ class Store:
             a["first"] = min(a["first"], ts)
             a["last"] = max(a["last"], ts)
             a["best"] = max(a["best"], r["confidence"])
-            a["hours"][ts.hour] = a["hours"].get(ts.hour, 0) + 1
+            a["hours"][hour] = a["hours"].get(hour, 0) + 1
         result = [
             SpeciesDay(
                 common_name=name, scientific_name=a["scientific_name"], count=a["count"],
-                first_heard=a["first"], last_heard=a["last"],
+                first_heard=datetime.strptime(a["first"], _ISO),
+                last_heard=datetime.strptime(a["last"], _ISO),
                 peak_hour=max(a["hours"], key=a["hours"].get), best_confidence=a["best"],
             )
             for name, a in agg.items()
@@ -555,26 +563,22 @@ class Store:
 
         # A companion means both species appeared in the same 15-minute soundscape
         # bucket. It is an exploratory relationship, not a biological claim.
-        companion_params: list[object] = [common_name]
-        target_where = "common_name = ?"
-        if start_day:
-            target_where += " AND day >= ?"
-            companion_params.append(start_day)
+        # Each row's bucket key is matched against the target's own buckets as
+        # an IN-list: one pass over the target's days, instead of a join on
+        # computed expressions that took seconds for a common species.
+        bucket = "substr(ts,1,13) || ':' || (CAST(substr(ts,15,2) AS INTEGER) / 15)"
+        scope = " AND day >= ?" if start_day else ""
+        scope_params = [start_day] if start_day else []
         companions = self._conn.execute(
-            "WITH target AS ("
-            " SELECT DISTINCT day, substr(ts,12,2) AS hh,"
-            " CAST(CAST(substr(ts,15,2) AS INTEGER) / 15 AS INTEGER) AS quarter"
-            f" FROM detections WHERE {target_where}"
-            ") SELECT d.common_name, MIN(d.scientific_name) AS scientific_name,"
-            " COUNT(DISTINCT d.day || substr(d.ts,12,2) ||"
-            " CAST(CAST(substr(d.ts,15,2) AS INTEGER) / 15 AS INTEGER)) AS shared_windows"
-            " FROM detections d JOIN target t ON d.day=t.day"
-            " AND substr(d.ts,12,2)=t.hh"
-            " AND CAST(CAST(substr(d.ts,15,2) AS INTEGER) / 15 AS INTEGER)=t.quarter"
-            " WHERE d.common_name != ?"
-            + (" AND d.day >= ?" if start_day else "") +
-            " GROUP BY d.common_name ORDER BY shared_windows DESC, d.common_name LIMIT 8",
-            companion_params + [common_name] + ([start_day] if start_day else []),
+            f"WITH target AS (SELECT DISTINCT {bucket} AS w FROM detections"
+            f" WHERE common_name = ?{scope}),"
+            " target_days AS (SELECT DISTINCT day FROM detections"
+            f" WHERE common_name = ?{scope})"
+            " SELECT common_name, MIN(scientific_name) AS scientific_name,"
+            f" COUNT(DISTINCT {bucket}) AS shared_windows FROM detections"
+            f" WHERE common_name != ? AND day IN target_days AND {bucket} IN target"
+            " GROUP BY common_name ORDER BY shared_windows DESC, common_name LIMIT 8",
+            [common_name, *scope_params, common_name, *scope_params, common_name],
         ).fetchall()
 
         return {
@@ -666,8 +670,10 @@ class Store:
         for r in species_rows:
             by_day[r["day"]].append(dict(r))
 
+        # Answered from the (common_name, ts) index alone, without the table.
         first_rows = self._conn.execute(
-            "SELECT common_name, MIN(day) AS first_day FROM detections GROUP BY common_name"
+            "SELECT common_name, substr(MIN(ts), 1, 10) AS first_day"
+            " FROM detections GROUP BY common_name"
         ).fetchall()
         debuts: dict[str, list[str]] = {d: [] for d in days}
         for r in first_rows:
@@ -811,8 +817,10 @@ class Store:
     def hour_histogram(self) -> list[int]:
         """All-time detection counts by hour of day (0–23) — the daily rhythm."""
         buckets = [0] * 24
-        for r in self._conn.execute("SELECT ts FROM detections").fetchall():
-            buckets[datetime.strptime(r["ts"], _ISO).hour] += 1
+        for r in self._conn.execute(
+                "SELECT CAST(substr(ts,12,2) AS INTEGER) AS hour, COUNT(*) AS n"
+                " FROM detections GROUP BY hour").fetchall():
+            buckets[r["hour"]] = r["n"]
         return buckets
 
     def daily_counts(self, limit: int = 60) -> list[dict]:
@@ -861,10 +869,31 @@ class Store:
     def first_ever_on_day(self, when: datetime) -> set[str]:
         """Species whose earliest-ever detection date is this day."""
         day = when.strftime("%Y-%m-%d")
+        # One index probe per species heard that day ("anything earlier?")
+        # rather than grouping the whole archive on every live poll. ISO
+        # timestamps before the day's date string are exactly the earlier days.
         rows = self._conn.execute(
-            "SELECT common_name, MIN(day) AS first_day FROM detections GROUP BY common_name"
+            "SELECT DISTINCT d.common_name FROM detections d WHERE d.day = ?"
+            " AND NOT EXISTS (SELECT 1 FROM detections e"
+            " WHERE e.common_name = d.common_name AND e.ts < ?)",
+            (day, day),
         ).fetchall()
-        return {r["common_name"] for r in rows if r["first_day"] == day}
+        return {r["common_name"] for r in rows}
+
+    def has_day(self, day: str) -> bool:
+        """Whether anything was heard on a day — an index probe, not a rollup."""
+        return self._conn.execute(
+            "SELECT 1 FROM detections WHERE day = ? LIMIT 1", (day,)
+        ).fetchone() is not None
+
+    def day_neighbours(self, day: str) -> tuple[str | None, str | None]:
+        """The nearest older and newer listening days, for paging the journal."""
+        row = self._conn.execute(
+            "SELECT (SELECT MAX(day) FROM detections WHERE day < ?) AS older,"
+            " (SELECT MIN(day) FROM detections WHERE day > ?) AS newer",
+            (day, day),
+        ).fetchone()
+        return row["older"], row["newer"]
 
     def add_image(self, generated_at, path, style, prompt, species,
                   source_day: str | None = None, style_reason: str = "",
