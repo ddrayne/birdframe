@@ -141,6 +141,18 @@ hard-veto a species via the "not here" blocklist (`config.blocked_species`).
   the data dir; `store.clips` table; served at `/api/clip`, played inline.
 - **Census** (`store.life_list/hour_histogram/totals`, `/api/census`): life
   list, all-time rhythm, CSV export.
+- **Seasons** (`seasons.py`, `/api/seasons`, MCP `get_season_story`): the long
+  view. `Store.day_profile` folds one day to species × quarter-hour through the
+  day index; `SeasonArchive` keeps every day before yesterday (one store call
+  per day, so the detector takes the lock between them), is warmed in the
+  background after startup, and is cleared when `/api/block` purges a species.
+  `analyse()` is pure. Statuses come from how unlikely a silence is by chance
+  (a bird heard on a share r of days unheard for g listening days: (1−r)^g <
+  1%, and ≥7 days), so a bird has "gone quiet", never "left". Dawn and dusk
+  use astral's sun times in the system's local zone, which is what stamps the
+  detections too; a voice's onset needs two busy quarter-hours in a row, and
+  birds heard at night ≥¼ as often as by day are left out of those timings.
+  Only confirmed/probable species tell the story; tentative ones are listed apart.
 - **Acoustic analytics + MCP** (`acoustics.py`, `/api/detections`,
   `/api/rankings`, `birdframe-mcp`): read-only cursor-based access to detection
   events and segment-level sound metrics. Counts are calls, not individual birds.

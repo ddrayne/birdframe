@@ -30,6 +30,13 @@ The dashboard is a personal field journal rather than a raw event monitor:
 - **Journal** reopens any listening day with its artwork, 15-minute
   soundscape, species-aware hourly rhythm, recordings, discoveries, and full
   roll call.
+- **Seasons** tells the longer story: a short written account of the season
+  so far; who arrived, who went quiet and who passed through, with a
+  week-by-week chart of every species; a “season clock” of every listening
+  day against sunrise and sunset, showing the chorus following the light;
+  who wakes first at dawn and what calls after dark; voices grown louder or
+  quieter lately; notable and doubtful visitors; records; the growing life
+  list; and a dated chronicle.
 - **Species** is the life list. Every species has a permanent dossier with
   day-by-day history, time-of-day pattern, confidence profile, recordings,
   co-occurring soundscapes, raw matches, and artwork appearances.
@@ -66,6 +73,10 @@ discarding stored detections.
   count of individual birds.
 - **Builds a census.** A life list with first-heard dates, an all-time daily
   rhythm chart, totals, and CSV export.
+- **Reads the seasons.** Arrivals, departures, passage birds and silent
+  spells are judged by how unlikely each silence would be by chance (a bird
+  has “gone quiet”, never certainly “left”), dawn and dusk are timed against
+  the sun at your location, and only well-supported species tell the story.
 - **Tells the story.** A short LLM-written line about each day's birdsong.
 - **Stays out of your way, tells you when it matters** — menu bar status, a
   health panel, and macOS notifications for a new life-list bird, a lost mic, or
@@ -276,6 +287,9 @@ FastAPI documents the complete schema at `http://localhost:8355/docs` and
 - `GET /api/rankings?metric=snr_db` — calls most prominent above ambient sound
 - `/api/now`, `/api/today`, `/api/census`, `/api/day/{day}`, and
   `/api/species/{common_name}` — live, historical, and species-level context
+- `GET /api/seasons` — the long view: statuses (arrived, gone quiet, passage,
+  resident…), the chorus against sunrise and sunset, trends, notable visitors,
+  records and a dated chronicle
 
 `birdframe-mcp` wraps those endpoints as a local, read-only MCP server over
 stdio. Configure an MCP client to run it from this checkout, for example:
@@ -294,7 +308,7 @@ Alternatively run it manually with `uv run birdframe-mcp`. Set
 `BIRDFRAME_API_URL` only if the dashboard is not at
 `http://localhost:8355`. Exposed tools cover the current soundscape, realtime
 waiting, raw queries, rankings, period comparisons, day/species dossiers,
-census data, and the retained best clips. Posting, generation, settings, and
+census data, the season's story, and the retained best clips. Posting, generation, settings, and
 blocklisting are intentionally not exposed through MCP.
 
 Counts mean BirdNET detection events or calls, not individual birds. New
