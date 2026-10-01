@@ -921,6 +921,33 @@ class Store:
         ).fetchone()
         return row["older"], row["newer"]
 
+    def listening_span(self) -> tuple[str | None, str | None]:
+        """The first and last days anything was heard. Two index probes: a
+        single SELECT MIN(day), MAX(day) would scan the whole table."""
+        row = self._conn.execute(
+            "SELECT (SELECT MIN(day) FROM detections) AS first,"
+            " (SELECT MAX(day) FROM detections) AS last"
+        ).fetchone()
+        return row["first"], row["last"]
+
+    def day_profile(self, day: str) -> list[dict]:
+        """One day's detections folded to species × quarter-hour: a count, the
+        best confidence and the first/last timestamp in each 15-minute slot.
+
+        The building block of the season view. It reads one day through the
+        (day, common_name) index, so summarising an archive day by day lets the
+        detector take the lock between days instead of waiting on one long scan.
+        """
+        rows = self._conn.execute(
+            "SELECT common_name, MIN(scientific_name) AS scientific_name,"
+            " CAST(substr(ts,12,2) AS INTEGER) * 4"
+            " + CAST(substr(ts,15,2) AS INTEGER) / 15 AS quarter,"
+            " COUNT(*) AS n, MAX(confidence) AS best, MIN(ts) AS first, MAX(ts) AS last"
+            " FROM detections WHERE day = ? GROUP BY common_name, quarter",
+            (day,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     def add_image(self, generated_at, path, style, prompt, species,
                   source_day: str | None = None, style_reason: str = "",
                   art_profile: dict | None = None,

@@ -376,10 +376,24 @@ def _start_dashboard(runtime: Runtime, config: Config, site=None) -> None:
     server = uvicorn.Server(uvicorn.Config(
         app, host="0.0.0.0", port=config.dashboard_port, log_level="warning"))
     threading.Thread(target=server.run, daemon=True).start()
+    threading.Thread(target=_warm_seasons, args=(app,), name="birdframe-seasons",
+                     daemon=True).start()
     lan_ip = _lan_ip()
     log.info("Dashboard at http://localhost:%d", config.dashboard_port)
     if lan_ip:
         log.info("On your network at http://%s:%d", lan_ip, config.dashboard_port)
+
+
+def _warm_seasons(app, delay: float = 120, now=datetime.now) -> None:
+    """Read the archive into the Seasons view's cache in the background, so
+    the first visit after a restart (there's one every night) doesn't wait
+    for the whole season to be read. Waits for BirdNET to settle in first."""
+    import time
+    time.sleep(delay)
+    try:
+        app.state.season_archive().profiles(now().date())
+    except Exception:
+        log.exception("Couldn't prepare the seasons view")
 
 
 _KEY_LABELS = {"openai": "OpenAI API key", "gemini": "Gemini API key",

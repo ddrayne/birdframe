@@ -626,3 +626,164 @@ select { cursor: pointer; }
 .schedule-row input[type="time"] { font-variant-numeric: tabular-nums; }
 .schedule-row .slot-remove { font-size: 16px; line-height: 1; }
 .schedule-row .slot-remove:disabled { opacity: .35; cursor: default; }
+
+/* ── seasons: the long view ── */
+.season-story { padding: clamp(24px, 4.5vw, 44px); background: linear-gradient(135deg, color-mix(in srgb, var(--gold-soft) 60%, var(--surface)), var(--surface) 72%); }
+.season-story .season-lede { margin: 12px 0 0; max-width: 900px; font: 500 clamp(23px, 3vw, 31px)/1.28 var(--serif); letter-spacing: -.01em; }
+.season-story p { margin: 14px 0 0; max-width: 900px; color: var(--ink-soft); font: 400 18px/1.62 var(--serif); }
+.jump-bar { display: flex; width: max-content; margin-top: 22px; }
+.season-section { scroll-margin-top: 92px; }
+.mini-head { margin: 22px 0 8px; font: 650 13px/1.2 var(--sans); }
+.movers .mover > b { display: block; margin: 6px 0 8px; color: var(--forest); font: 500 34px/1 var(--serif); }
+.mover-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.mover-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+.mover-list a { color: var(--ink); font-weight: 650; }
+.mover-list small { display: block; color: var(--ink-faint); font-size: 11px; }
+.mover-list .round-button { width: 30px; height: 30px; font-size: 11px; }
+
+.season-chart { position: relative; overflow-x: auto; padding-bottom: 6px; }
+.pheno-axis, .pheno-row { display: grid; grid-template-columns: minmax(124px, 210px) repeat(var(--weeks), minmax(11px, 1fr)) 44px; min-width: calc(180px + var(--weeks) * 14px); gap: 3px; align-items: center; }
+.pheno-axis { padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.pheno-axis span { color: var(--ink-faint); font: 9.5px/1 var(--mono); white-space: nowrap; }
+.pheno-axis span:last-child { text-align: right; }
+.pheno-group { padding: 18px 0 6px; }
+.pheno-group h3 { margin: 0; font: 650 13px/1.2 var(--sans); }
+.pheno-group h3 small { margin-left: 4px; color: var(--ink-faint); font-weight: 500; }
+.pheno-group p { margin: 2px 0 0; color: var(--ink-faint); font-size: 11px; }
+.pheno-row { min-height: 32px; border-top: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }
+.pheno-row > a { min-width: 0; padding-right: 8px; color: var(--ink); font-size: 12px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pheno-row > a small { display: block; color: var(--ink-faint); font: 9.5px/1.35 var(--mono); }
+.pheno-row > b { color: var(--ink-soft); font: 10px var(--mono); text-align: right; }
+.pheno-cell { height: 18px; border-radius: 3px; background: color-mix(in srgb, var(--forest) var(--strength), var(--surface-strong)); cursor: crosshair; }
+.pheno-cell.off { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--line) 3px 4px); }
+.pheno-cell:hover { outline: 2px solid color-mix(in srgb, var(--forest) 55%, transparent); outline-offset: 1px; }
+.pheno-members[data-collapsed="true"] > .pheno-row:nth-child(n+7) { display: none; }
+.pheno-more { margin: 8px 0 2px; font-size: 12px; }
+
+.season-clock svg { cursor: crosshair; touch-action: pan-y; }
+.season-clock .plot { fill: var(--surface-soft); }
+.season-clock .tick { stroke: var(--line); }
+.season-clock .h0 { fill: color-mix(in srgb, var(--forest) 13%, var(--surface-soft)); }
+.season-clock .h1 { fill: color-mix(in srgb, var(--forest) 24%, var(--surface-soft)); }
+.season-clock .h2 { fill: color-mix(in srgb, var(--forest) 35%, var(--surface-soft)); }
+.season-clock .h3 { fill: color-mix(in srgb, var(--forest) 46%, var(--surface-soft)); }
+.season-clock .h4 { fill: color-mix(in srgb, var(--forest) 58%, var(--surface-soft)); }
+.season-clock .h5 { fill: color-mix(in srgb, var(--forest) 70%, var(--surface-soft)); }
+.season-clock .h6 { fill: color-mix(in srgb, var(--forest) 84%, var(--surface-soft)); }
+.season-clock .h7 { fill: var(--forest); }
+.season-clock .halo, .season-clock .sun, .season-clock .voice { fill: none; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.season-clock .halo { stroke: var(--surface); stroke-width: 5; opacity: .92; }
+.season-clock .sun { stroke: var(--gold); stroke-width: 2; }
+.season-clock .voice { stroke: var(--ink); stroke-width: 2; }
+.season-clock .focus-mark { fill: none; stroke: var(--ink); stroke-width: 1.5; vector-effect: non-scaling-stroke; pointer-events: none; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 10px; color: var(--ink-soft); font-size: 11px; }
+.chart-legend span { display: inline-flex; align-items: center; gap: 7px; }
+.key-ramp { width: 46px; height: 9px; border-radius: 3px; background: linear-gradient(90deg, color-mix(in srgb, var(--forest) 13%, var(--surface-soft)), var(--forest)); }
+.key-line { width: 18px; height: 2px; border-radius: 2px; background: var(--ink); }
+.key-line.sun { background: var(--gold); }
+.light-callouts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+.table-view { margin-top: 14px; }
+.table-view summary { color: var(--forest); cursor: pointer; font-size: 12px; font-weight: 700; }
+.chart .hit { fill: transparent; }
+.chart g:hover .bar { opacity: 1; }
+.growth-chart .end-dot { fill: var(--forest); stroke: var(--surface); stroke-width: 2; }
+
+.roster { position: relative; }
+.roster-axis, .roster-row { display: grid; grid-template-columns: minmax(110px, 170px) minmax(0, 1fr) 104px; gap: 12px; align-items: center; }
+.roster-axis > div { position: relative; height: 16px; }
+.roster-axis > div span { position: absolute; transform: translateX(-50%); color: var(--ink-faint); font: 9.5px/1 var(--mono); white-space: nowrap; }
+.roster-row { min-height: 30px; border-top: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }
+.roster-row a { min-width: 0; color: var(--ink); font-size: 12px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.roster-row > span { color: var(--ink-soft); font: 10.5px var(--mono); text-align: right; }
+.roster-track { position: relative; height: 18px; background: linear-gradient(90deg, transparent calc(var(--zero) - 1px), color-mix(in srgb, var(--gold) 75%, transparent) calc(var(--zero) - 1px), color-mix(in srgb, var(--gold) 75%, transparent) calc(var(--zero) + 1px), transparent calc(var(--zero) + 1px)); }
+.roster-track i { position: absolute; top: 6px; height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--forest) 30%, var(--surface-strong)); }
+.roster-track b { position: absolute; top: 4px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: var(--forest); box-shadow: 0 0 0 2px var(--surface); }
+.roster-row:hover .roster-track b { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px color-mix(in srgb, var(--forest) 30%, transparent); }
+.roster-more { margin-top: 10px; font-size: 12px; }
+.roster-row .short { display: none; }
+
+.voice-row { display: grid; grid-template-columns: minmax(0, 1fr) 112px 60px; gap: 12px; align-items: center; padding: 11px 0; border-top: 1px solid var(--line); }
+.voice-row:first-of-type { border-top: 0; }
+.voice-row a { color: var(--ink); font-weight: 650; }
+.voice-row small { display: block; color: var(--ink-faint); font-size: 11px; }
+.voice-row .chart { min-height: 0 !important; }
+.voice-row .chart svg { height: 34px; }
+.voice-row b { color: var(--ink); font: 700 13px var(--mono); text-align: right; }
+
+.visitor { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) 200px; gap: 14px; align-items: center; padding: 13px 0; border-top: 1px solid var(--line); }
+.visitor:first-child { border-top: 0; }
+.visitor a { color: var(--ink); font-weight: 650; }
+.visitor .round-button { width: 28px; height: 28px; margin-left: 6px; vertical-align: middle; font-size: 10px; }
+.visitor .scientific { display: block; font-size: 11px; }
+.visitor-why { display: flex; flex-wrap: wrap; gap: 6px; }
+.visitor-why span:not(.tier) { padding: 3px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-soft); color: var(--ink-soft); font-size: 11px; }
+.visitor-when { color: var(--ink-soft); font-size: 12px; text-align: right; }
+.visitor-when small { display: block; color: var(--ink-faint); font-size: 10.5px; }
+.doubtful summary { display: flex; justify-content: space-between; align-items: center; gap: 16px; cursor: pointer; list-style: none; }
+.doubtful summary::-webkit-details-marker { display: none; }
+.doubtful[open] .if-closed, .doubtful:not([open]) .if-open { display: none; }
+.doubtful summary .eyebrow { display: block; margin-bottom: 4px; }
+.doubtful summary b { font: 500 21px var(--serif); }
+.doubtful summary small { display: block; margin-top: 3px; color: var(--ink-soft); }
+
+.records-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.record { display: flex; flex-direction: column; gap: 6px; min-height: 122px; padding: 16px 17px; color: var(--ink); transition: border-color .15s, transform .15s; }
+a.record:hover { border-color: var(--forest); transform: translateY(-2px); }
+.record b { color: var(--forest); font: 500 25px/1.1 var(--serif); }
+.record small { margin-top: auto; color: var(--ink-faint); font-size: 11.5px; }
+.milestones { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.milestones a { display: grid; grid-template-columns: auto 1fr; column-gap: 10px; align-items: baseline; padding: 9px 13px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-soft); color: var(--ink); }
+.milestones b { grid-row: span 2; color: var(--forest); font: 500 22px/1 var(--serif); }
+.milestones span { font-size: 12px; font-weight: 650; }
+.milestones small { color: var(--ink-faint); font-size: 10.5px; }
+
+.chronicle section + section { margin-top: 22px; }
+/* Folded, the chronicle shows its ten latest events (newest first). */
+.chronicle[data-collapsed="true"] .later { display: none; }
+.chronicle-more { margin-top: 14px; font-size: 12px; }
+.chronicle h3 { margin: 0 0 6px; font: 500 22px var(--serif); }
+.chronicle ol { margin: 0; padding: 0; list-style: none; }
+.chronicle li { display: grid; grid-template-columns: 58px 108px minmax(0, 1fr); gap: 12px; align-items: baseline; padding: 11px 0; border-top: 1px solid var(--line); }
+.chronicle time { color: var(--ink-soft); font: 700 12px var(--mono); }
+.chronicle-kind { justify-self: start; padding: 3px 8px; border-radius: 999px; background: var(--surface-strong); color: var(--ink-soft); font-size: 9.5px; font-weight: 750; letter-spacing: .05em; text-transform: uppercase; white-space: nowrap; }
+.chronicle li a { color: var(--ink); font-weight: 650; }
+.chronicle li small { display: block; color: var(--ink-faint); font-size: 12px; }
+.season-methods { margin-top: 26px; }
+.season-methods p { max-width: 860px; color: var(--ink-soft); }
+
+@media (max-width: 960px) {
+  .header-inner { gap: 18px; }
+  .primary-nav a { padding-inline: 7px; font-size: 14px; }
+  .records-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 760px) {
+  .mobile-nav { grid-template-columns: repeat(6, 1fr); }
+  .mobile-nav .nav-icon { width: 44px; }
+  .season-section { scroll-margin-top: 14px; }
+  .season-story p { font-size: 17px; }
+  .light-callouts, .records-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .roster-axis, .roster-row { grid-template-columns: 104px minmax(0, 1fr) 58px; gap: 8px; }
+  .roster-row .long { display: none; }
+  .roster-row .short { display: inline; }
+  .pheno-axis, .pheno-row { grid-template-columns: 100px repeat(var(--weeks), minmax(9px, 1fr)) 26px; min-width: calc(132px + var(--weeks) * 11px); gap: 2px; }
+  .pheno-axis span:last-child { visibility: hidden; }
+  .pheno-row > a, .roster-row a { white-space: normal; line-height: 1.25; }
+  .pheno-row > a small { display: none; }
+  .light-callouts strong { font-size: 18px; }
+  .voice-row { grid-template-columns: minmax(0, 1fr) 76px 52px; gap: 9px; }
+  .visitor { grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; }
+  .visitor-why { grid-column: 1 / -1; grid-row: 2; }
+  .chronicle li { grid-template-columns: 52px minmax(0, 1fr); gap: 4px 10px; }
+  .chronicle li > div { grid-column: 2; }
+}
+
+@media (max-width: 430px) {
+  .mobile-nav a { font-size: 10px; }
+  .mobile-nav .nav-icon { width: 40px; }
+  .record b { font-size: 21px; }
+}
+
+@media (hover: none) {
+  a.record:hover { transform: none; }
+}

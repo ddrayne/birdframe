@@ -197,3 +197,286 @@ export function dailySpeciesBars(rows) {
   return `<div class="chart interactive-chart" role="img" aria-label="Species richness by day"><svg viewBox="0 0 ${width} ${height}">${bars}</svg><div class="chart-tooltip" aria-hidden="true"></div></div>
     <div class="chart-caption"><span>${esc(rows[0].day.slice(5))}</span><span>species per day</span><span>${esc(rows.at(-1).day.slice(5))}</span></div>`;
 }
+
+// ---- The long view (Seasons) ---------------------------------------------
+
+const DAY_MS = 86_400_000;
+const dayNumber = day => Math.round(Date.parse(`${day}T00:00:00Z`) / DAY_MS);
+const monthShort = day => new Intl.DateTimeFormat('en-GB', {month: 'short', timeZone: 'UTC'}).format(new Date(`${day}T12:00:00Z`));
+
+export function clockTime(minutes) {
+  if (minutes == null) return '—';
+  const whole = Math.round(minutes);
+  return `${String(Math.floor(((whole % 1440) + 1440) % 1440 / 60)).padStart(2, '0')}:${String(((whole % 60) + 60) % 60).padStart(2, '0')}`;
+}
+
+// "1 h 25 min" / "40 min", for offsets from sunrise or sunset.
+export function span(minutes) {
+  const whole = Math.round(Math.abs(minutes));
+  const hours = Math.floor(whole / 60), mins = whole % 60;
+  if (!hours) return `${mins} min`;
+  return mins ? `${hours} h ${mins} min` : `${hours} h`;
+}
+
+function linePath(points) {
+  let path = '', open = false;
+  points.forEach(point => {
+    if (!point) { open = false; return; }
+    path += `${open ? 'L' : 'M'}${point[0].toFixed(1)} ${point[1].toFixed(1)}`;
+    open = true;
+  });
+  return path;
+}
+
+// The smallest 1, 2, 2.5 or 5 × 10^k at or above a value: round axis ticks.
+function niceCeil(value) {
+  if (value <= 0) return 1;
+  const scale = 10 ** Math.floor(Math.log10(value));
+  return scale * [1, 2, 2.5, 5, 10].find(step => step * scale >= value);
+}
+
+// A column with a softly rounded data end and a square foot on the baseline.
+function columnPath(x, y, w, h, r = 4) {
+  if (h <= 0) return '';
+  const radius = Math.min(r, w / 2, h);
+  return `M${x} ${y + h}V${y + radius}Q${x} ${y} ${x + radius} ${y}H${x + w - radius}` +
+    `Q${x + w} ${y} ${x + w} ${y + radius}V${y + h}Z`;
+}
+
+// Hover for charts drawn as one SVG: `resolve(x, y)` gets the pointer in the
+// drawing's own units and returns {text, focus: {x, y, width, height}} or null.
+export function wirePointerTooltip(chart, resolve) {
+  const svg = chart?.querySelector('svg');
+  const tooltip = chart?.querySelector(':scope > .chart-tooltip');
+  const focus = svg?.querySelector('.focus-mark');
+  if (!svg || !tooltip) return;
+  let hideTimer = null;
+  const hide = () => { tooltip.classList.remove('visible'); focus?.setAttribute('visibility', 'hidden'); };
+  const show = event => {
+    clearTimeout(hideTimer);
+    const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(svg.getScreenCTM().inverse());
+    const found = resolve(point.x, point.y);
+    if (!found) { hide(); return; }
+    tooltip.textContent = found.text;
+    tooltip.classList.add('visible');
+    tooltip.style.left = `${Math.min(Math.max(event.clientX, 120), window.innerWidth - 120)}px`;
+    tooltip.style.top = `${Math.max(16, event.clientY - 12)}px`;
+    if (focus && found.focus) {
+      Object.entries(found.focus).forEach(([key, value]) => focus.setAttribute(key, value));
+      focus.setAttribute('visibility', 'visible');
+    }
+  };
+  svg.addEventListener('pointermove', show);
+  svg.addEventListener('pointerdown', show);
+  // A lifted finger leaves at once; give the reader a moment, as the other charts do.
+  svg.addEventListener('pointerleave', event => {
+    if (event.pointerType === 'touch') hideTimer = setTimeout(hide, 2600);
+    else hide();
+  });
+}
+
+// Every quarter-hour of every listening day (columns are days, time runs down),
+// with sunrise and sunset, and the first and last voices, drawn across it.
+export function seasonClock(clock, lightDays = []) {
+  if (!clock?.length) return {html: '<div class="empty">No listening days yet.</div>', resolve: () => null};
+  const phone = chartWidth() < 720;
+  const width = chartWidth(), left = phone ? 42 : 44, right = 6, top = 8, bottom = 26;
+  const height = phone ? 330 : 360;
+  const innerW = width - left - right, innerH = height - top - bottom;
+  const first = dayNumber(clock[0].day);
+  const spanDays = dayNumber(clock.at(-1).day) - first + 1;
+  const colW = innerW / spanDays, qh = innerH / 96;
+  let max = 1;
+  clock.forEach(day => day.q.forEach(value => { if (value > max) max = value; }));
+  const xOf = day => left + (dayNumber(day) - first) * colW;
+  const yOf = minutes => top + minutes / 1440 * innerH;
+  const cells = [];
+  clock.forEach(day => {
+    const x = xOf(day.day).toFixed(2);
+    day.q.forEach((value, q) => {
+      if (!value) return;
+      const step = Math.min(7, Math.floor(Math.sqrt(value / max) * 8));
+      cells.push(`<rect class="h${step}" x="${x}" y="${(top + q * qh).toFixed(2)}" width="${(colW + .35).toFixed(2)}" height="${(qh + .35).toFixed(2)}"></rect>`);
+    });
+  });
+  const mid = day => xOf(day) + colW / 2;
+  const sunLine = key => linePath(clock.map(day => day[key] == null ? null : [mid(day.day), yOf(day[key])]));
+  // A week's median keeps the voices' line honest without chasing every stray day.
+  const rolling = key => lightDays.map((day, i) => {
+    const near = lightDays.slice(Math.max(0, i - 3), i + 4).map(d => d[key]).filter(v => v != null).sort((a, b) => a - b);
+    return near.length >= 3 ? [mid(day.day), yOf(near[Math.floor(near.length / 2)])] : null;
+  });
+  const voiceLine = key => linePath(rolling(key));
+  const hours = (phone ? [0, 6, 12, 18, 24] : [0, 3, 6, 9, 12, 15, 18, 21, 24]);
+  const yLabels = hours.map(hour => `<text x="${left - 6}" y="${(yOf(hour * 60) + 3.5).toFixed(1)}" text-anchor="end">${String(hour).padStart(2, '0')}:00</text>
+    <line class="tick" x1="${left - 3}" x2="${left}" y1="${yOf(hour * 60).toFixed(1)}" y2="${yOf(hour * 60).toFixed(1)}"></line>`).join('');
+  const months = [];
+  for (let n = 0; n < spanDays; n++) {
+    const day = new Date((first + n) * DAY_MS).toISOString().slice(0, 10);
+    if (day.endsWith('-01') || (n === 0 && Number(day.slice(8)) <= 20)) months.push(day);
+  }
+  const xLabels = months.map(day => `<text x="${(xOf(day) + 2).toFixed(1)}" y="${height - 8}">${esc(monthShort(day))}</text>
+    <line class="tick" x1="${xOf(day).toFixed(1)}" x2="${xOf(day).toFixed(1)}" y1="${top + innerH}" y2="${top + innerH + 4}"></line>`).join('');
+  const html = `<div class="chart season-clock" role="img" aria-label="Detections through every quarter-hour of the season, with sunrise, sunset and the first and last voices of each day">
+    <svg viewBox="0 0 ${width} ${height}">
+      <rect class="plot" x="${left}" y="${top}" width="${innerW}" height="${innerH}"></rect>
+      <g class="cells">${cells.join('')}</g>
+      <g class="sun-lines"><path class="halo" d="${sunLine('sunrise')}"></path><path class="halo" d="${sunLine('sunset')}"></path>
+        <path class="sun" d="${sunLine('sunrise')}"></path><path class="sun" d="${sunLine('sunset')}"></path></g>
+      <g class="voice-lines"><path class="halo" d="${voiceLine('first')}"></path><path class="halo" d="${voiceLine('last')}"></path>
+        <path class="voice" d="${voiceLine('first')}"></path><path class="voice" d="${voiceLine('last')}"></path></g>
+      <rect class="focus-mark" visibility="hidden"></rect>
+      ${yLabels}${xLabels}
+    </svg><div class="chart-tooltip" aria-hidden="true"></div></div>`;
+
+  const byDay = new Map(clock.map(day => [dayNumber(day.day), day]));
+  const lightByDay = new Map(lightDays.map(day => [dayNumber(day.day), day]));
+  const resolve = (x, y) => {
+    if (x < left || x > left + innerW || y < top || y > top + innerH) return null;
+    const n = first + Math.min(spanDays - 1, Math.floor((x - left) / colW));
+    const q = Math.min(95, Math.floor((y - top) / qh));
+    const day = byDay.get(n);
+    const date = new Date(n * DAY_MS).toISOString().slice(0, 10);
+    const lines = [`${dateLabel(date, 'short')} · ${clockTime(q * 15)}–${clockTime(q * 15 + 15)}`];
+    if (!day) lines.push('Not listening that day');
+    else {
+      const value = day.q[q];
+      lines.push(`${num(value)} ${value === 1 ? 'detection' : 'detections'}`);
+      if (day.sunrise != null) lines.push(`Sunrise ${clockTime(day.sunrise)} · sunset ${clockTime(day.sunset)}`);
+      const light = lightByDay.get(n);
+      if (light?.first != null) lines.push(`First voice ${clockTime(light.first)} · ${light.first_species}`);
+      if (light?.last != null) lines.push(`Last voice ${clockTime(light.last)} · ${light.last_species}`);
+    }
+    return {text: lines.join('\n'), focus: {x: (left + (n - first) * colW).toFixed(2), y: (top + q * qh).toFixed(2),
+      width: Math.max(colW, 2).toFixed(2), height: Math.max(qh, 2).toFixed(2)}};
+  };
+  return {html, resolve};
+}
+
+// Columns for a weekly series (one value per week, nulls left blank).
+export function weekBars(weeks, values, {height = 170, width = chartWidth(), label = 'By week', tip = () => ''} = {}) {
+  if (!weeks?.length) return '<div class="empty">Nothing yet.</div>';
+  const left = 40, right = 6, top = 12, bottom = 24;
+  const innerW = width - left - right, innerH = height - top - bottom;
+  const max = niceCeil(Math.max(1, ...values.map(v => v || 0)));
+  const slot = innerW / weeks.length, barW = Math.min(24, slot - 2);
+  const ticks = [0, .5, 1].map(frac => {
+    const y = top + innerH * (1 - frac);
+    return `<line class="grid" x1="${left}" x2="${width - right}" y1="${y}" y2="${y}"></line>
+      <text x="${left - 6}" y="${y + 3.5}" text-anchor="end">${num(Math.round(max * frac))}</text>`;
+  }).join('');
+  let lastMonth = '';
+  const bars = weeks.map((week, i) => {
+    const value = values[i];
+    const x = left + i * slot + (slot - barW) / 2;
+    const h = value ? Math.max(1.5, value / max * innerH) : 0;
+    const month = monthShort(new Date(Date.parse(`${week.start}T12:00:00Z`) + 3 * DAY_MS).toISOString().slice(0, 10));
+    const monthLabel = month !== lastMonth ? `<text x="${(left + i * slot + slot / 2).toFixed(1)}" y="${height - 8}" text-anchor="middle">${esc(month)}</text>` : '';
+    lastMonth = month;
+    const detail = tip(week, value, i);
+    return `<g ${detail ? `data-chart-tip="${attr(detail)}"` : ''}><rect class="hit" x="${(left + i * slot).toFixed(1)}" y="${top}" width="${slot.toFixed(1)}" height="${innerH}"></rect>
+      ${h ? `<path class="bar" d="${columnPath(x, top + innerH - h, barW, h)}"></path>` : ''}</g>${monthLabel}`;
+  }).join('');
+  return `<div class="chart interactive-chart" role="img" aria-label="${attr(label)}"><svg viewBox="0 0 ${width} ${height}">
+    ${ticks}${bars}</svg><div class="chart-tooltip" aria-hidden="true"></div></div>`;
+}
+
+// The life list accumulating: a step line with a soft wash, labelled at its end.
+export function growthChart(points, {height = 190} = {}) {
+  if (!points?.length) return '<div class="empty">The life list starts with the first bird.</div>';
+  const width = chartWidth(), left = 34, right = 16, top = 14, bottom = 24;
+  const innerW = width - left - right, innerH = height - top - bottom;
+  const first = dayNumber(points[0].day);
+  const spanDays = Math.max(1, dayNumber(points.at(-1).day) - first);
+  const max = niceCeil(Math.max(1, points.at(-1).total));
+  const xOf = day => left + (dayNumber(day) - first) / spanDays * innerW;
+  const yOf = total => top + innerH - total / max * innerH;
+  let path = '';
+  points.forEach((point, i) => {
+    const x = xOf(point.day).toFixed(1), y = yOf(point.total).toFixed(1);
+    path += i ? `H${x}V${y}` : `M${x} ${y}`;
+  });
+  const area = `${path}V${top + innerH}H${xOf(points[0].day).toFixed(1)}Z`;
+  const end = points.at(-1);
+  const ticks = [0, .5, 1].map(frac => {
+    const y = top + innerH * (1 - frac);
+    return `<line class="grid" x1="${left}" x2="${width - right}" y1="${y}" y2="${y}"></line>
+      <text x="${left - 6}" y="${y + 3.5}" text-anchor="end">${Math.round(max * frac)}</text>`;
+  }).join('');
+  const strips = points.map((point, i) => {
+    const x0 = i ? (xOf(points[i - 1].day) + xOf(point.day)) / 2 : left;
+    const x1 = i < points.length - 1 ? (xOf(point.day) + xOf(points[i + 1].day)) / 2 : width - right;
+    const added = point.total - (i ? points[i - 1].total : 0);
+    const detail = `${dateLabel(point.day, 'short')} · ${point.total} species${added ? ` (+${added})` : ''}`;
+    return `<rect class="hit" x="${x0.toFixed(1)}" y="${top}" width="${Math.max(.5, x1 - x0).toFixed(1)}" height="${innerH}" data-chart-tip="${attr(detail)}"></rect>`;
+  }).join('');
+  const months = [];
+  for (let n = 0; n <= spanDays; n++) {
+    const day = new Date((first + n) * DAY_MS).toISOString().slice(0, 10);
+    if (day.endsWith('-01') || (n === 0 && Number(day.slice(8)) <= 20)) months.push(day);
+  }
+  const xLabels = months.map(day => `<text x="${(xOf(day) + 2).toFixed(1)}" y="${height - 7}">${esc(monthShort(day))}</text>`).join('');
+  return `<div class="chart interactive-chart growth-chart" role="img" aria-label="Well-supported species on the life list, day by day: ${end.total} now">
+    <svg viewBox="0 0 ${width} ${height}">${ticks}<path class="area" d="${area}"></path><path class="line" d="${path}"></path>
+      <circle class="end-dot" cx="${xOf(end.day).toFixed(1)}" cy="${yOf(end.total).toFixed(1)}" r="4"></circle>
+      ${xLabels}${strips}</svg><div class="chart-tooltip" aria-hidden="true"></div></div>`;
+}
+
+
+// Who wakes first: each species' median start against sunrise, with the
+// middle half of its mornings as a bar.
+export function dawnRoster(rows) {
+  if (!rows?.length) return '<div class="empty">Not enough mornings yet to say who wakes first.</div>';
+  const floor30 = value => Math.floor(value / 30) * 30, ceil30 = value => Math.ceil(value / 30) * 30;
+  const lo = Math.max(-150, Math.min(-60, floor30(Math.min(...rows.map(r => r.q1)))));
+  const hi = Math.min(240, Math.max(60, ceil30(Math.max(...rows.map(r => r.q3)))));
+  const at = minutes => `${((Math.min(hi, Math.max(lo, minutes)) - lo) / (hi - lo) * 100).toFixed(2)}%`;
+  const when = minutes => minutes === 0 ? 'at sunrise' : `${span(minutes)} ${minutes < 0 ? 'before' : 'after'}`;
+  const signed = minutes => minutes === 0 ? '0 min' : `${minutes < 0 ? '−' : '+'}${Math.abs(minutes)} min`;
+  const ticks = [];
+  for (let m = Math.ceil(lo / 60) * 60; m <= hi; m += 60) ticks.push(m);
+  const axis = `<div class="roster-axis"><span></span><div>${ticks.map(m => `<span style="left:${at(m)}">${m === 0 ? 'sunrise' : `${m > 0 ? '+' : '−'}${Math.abs(m / 60)} h`}</span>`).join('')}</div><span></span></div>`;
+  const body = rows.map(row => {
+    const detail = `${row.common_name}\nUsually gets going ${when(row.median)}\nMiddle half of mornings: ${when(row.q1)} to ${when(row.q3)}\n${row.mornings} mornings`;
+    return `<div class="roster-row" role="listitem" data-chart-tip="${attr(detail)}">
+      <a href="${speciesHref(row.common_name)}">${esc(row.common_name)}</a>
+      <div class="roster-track" style="--zero:${at(0)}"><i style="left:${at(row.q1)};width:calc(${at(row.q3)} - ${at(row.q1)})"></i><b style="left:${at(row.median)}"></b></div>
+      <span><span class="long">${Math.abs(row.median)} min ${row.median < 0 ? 'before' : 'after'}</span><span class="short">${signed(row.median)}</span></span>
+    </div>`;
+  }).join('');
+  return `<div class="roster interactive-chart" role="list" aria-label="Species in the order they start singing, against sunrise">${axis}${body}<div class="chart-tooltip" aria-hidden="true"></div></div>`;
+}
+
+// The season chart: one row per species, one cell per week, darker where it
+// was heard on more of that week's listening days.
+export function seasonChart(rows, weeks, groups) {
+  if (!rows?.length) return '<div class="empty">No well-supported species yet.</div>';
+  const columns = `--weeks:${weeks.length}`;
+  let lastMonth = '';
+  const axis = `<div class="pheno-axis" style="${columns}"><span></span>${weeks.map(week => {
+    const month = monthShort(new Date(Date.parse(`${week.start}T12:00:00Z`) + 3 * DAY_MS).toISOString().slice(0, 10));
+    const label = month !== lastMonth ? month : '';
+    lastMonth = month;
+    return `<span>${esc(label)}</span>`;
+  }).join('')}<span>days</span></div>`;
+  const body = groups.map(group => {
+    const members = rows.filter(row => row.status === group.status);
+    if (!members.length) return '';
+    const fold = members.length > 8;
+    return `<div class="pheno-group"><h3>${esc(group.title)} <small>${members.length}</small></h3><p>${esc(group.note)}</p></div>
+      <div class="pheno-members" data-collapsed="${fold}">${members.map(row => `<div class="pheno-row" style="${columns}">
+        <a href="${speciesHref(row.common_name)}" title="Open ${attr(row.common_name)} dossier">${esc(row.common_name)}<small>${esc(group.detail(row))}</small></a>
+        ${weeks.map((week, i) => {
+          const heard = row.presence[i], days = week.days;
+          const share = days ? heard / days : 0;
+          const detail = `${row.common_name}\nWeek of ${dateLabel(week.start, 'short')}\n` + (days
+            ? `Heard on ${heard} of ${days} listening ${days === 1 ? 'day' : 'days'} · ${num(row.volume[i])} ${row.volume[i] === 1 ? 'detection' : 'detections'}`
+            : 'Not listening that week');
+          return `<span class="pheno-cell${days ? '' : ' off'}" aria-hidden="true" style="--strength:${heard ? Math.round(18 + share * 82) : 0}%" data-chart-tip="${attr(detail)}"></span>`;
+        }).join('')}
+        <b>${row.days}</b>
+      </div>`).join('')}</div>
+      ${fold ? `<button type="button" class="text-link pheno-more" data-more="${members.length}">Show all ${members.length}</button>` : ''}`;
+  }).join('');
+  return `<div class="season-chart interactive-chart" role="group" aria-label="Each species, week by week across the season">${axis}<div>${body}</div><div class="chart-tooltip" aria-hidden="true"></div></div>`;
+}

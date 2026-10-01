@@ -168,6 +168,17 @@ def create_server(api: BirdframeAPI | None = None) -> FastMCP:
         return api.get("/api/census")
 
     @server.tool(annotations=read_only)
+    def get_season_story() -> dict:
+        """Get the long view: arrivals, birds gone quiet, passage migrants and
+        silent spells; the dawn chorus against sunrise; voices grown louder or
+        quieter lately; notable visitors; records; and a dated chronicle."""
+        story = api.get("/api/seasons")
+        story.pop("clock", None)            # quarter-hour drawing data for the chart
+        if story.get("light"):
+            story["light"].pop("days", None)
+        return story
+
+    @server.tool(annotations=read_only)
     def get_best_clip(common_name: str) -> dict:
         """Get the URL of the retained best recording for a species."""
         species = api.get(f"/api/species/{quote(common_name, safe='')}")

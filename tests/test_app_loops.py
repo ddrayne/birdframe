@@ -5,7 +5,9 @@ import os
 import signal
 import threading
 
-from birdframe.app import _first_notice_in, _scheduler_step, _serve_headless
+from types import SimpleNamespace
+
+from birdframe.app import _first_notice_in, _scheduler_step, _serve_headless, _warm_seasons
 
 
 class FakeRuntime:
@@ -32,6 +34,19 @@ def test_scheduler_step_restarts_before_posting():
     _scheduler_step(runtime, datetime(2026, 9, 25, 4, 0), exit_process=exits.append)
     assert exits == [0]
     assert runtime.ticks == []
+
+
+def test_seasons_are_warmed_in_the_background_and_failures_stay_quiet(caplog):
+    asked = []
+    archive = SimpleNamespace(profiles=asked.append)
+    app = SimpleNamespace(state=SimpleNamespace(season_archive=lambda: archive))
+    _warm_seasons(app, delay=0, now=lambda: datetime(2026, 10, 1, 4, 5))
+    assert asked == [datetime(2026, 10, 1).date()]
+
+    def broken():
+        raise RuntimeError("database is locked")
+    _warm_seasons(SimpleNamespace(state=SimpleNamespace(season_archive=broken)), delay=0)
+    assert "Couldn't prepare the seasons view" in caplog.text
 
 
 def test_notice_is_throttled_across_restarts(tmp_path):

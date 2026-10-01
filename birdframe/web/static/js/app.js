@@ -3,6 +3,7 @@ import {
 } from './core.js';
 import {renderToday} from './views/today.js';
 import {renderJournal} from './views/journal.js';
+import {renderSeasons} from './views/seasons.js';
 import {renderSpecies} from './views/species.js';
 import {renderPatterns} from './views/patterns.js';
 import {renderPictures} from './views/pictures.js';
@@ -40,16 +41,18 @@ async function renderRoute() {
   followedLink = false;
   shownHash = location.hash;
   const route = parseRoute();
-  const valid = ['today', 'journal', 'species', 'patterns', 'pictures', 'settings'];
+  const valid = ['today', 'journal', 'seasons', 'species', 'patterns', 'pictures', 'settings'];
   if (!valid.includes(route.top)) { location.replace('#today'); return; }
   const token = ++state.routeToken;
   markNavigation(route.top);
-  loading(route.top === 'species' && route.detail ? `Opening the ${route.detail} dossier…` : 'Reading the field journal…');
+  loading(route.top === 'species' && route.detail ? `Opening the ${route.detail} dossier…`
+    : route.top === 'seasons' ? 'Reading the season…' : 'Reading the field journal…');
   window.scrollTo({top: 0, behavior: 'instant'});
   document.title = `${route.detail || route.top} · birdframe`;
   try {
     if (route.top === 'today') await renderToday(token);
     else if (route.top === 'journal') await renderJournal(token, route.detail);
+    else if (route.top === 'seasons') await renderSeasons(token);
     else if (route.top === 'species') await renderSpecies(token, route.detail, route.params);
     else if (route.top === 'patterns') await renderPatterns(token, route.params);
     else if (route.top === 'pictures') await renderPictures(token, route.detail || 'editions', route.params);

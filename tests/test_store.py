@@ -390,6 +390,32 @@ def test_day_probes_for_existence_and_journal_neighbours(tmp_path):
     assert s.day_neighbours("2026-07-09") == ("2026-07-05", None)
 
 
+def test_listening_span_probes_the_index_for_first_and_last_day(tmp_path):
+    s = Store(tmp_path / "db.sqlite")
+    assert s.listening_span() == (None, None)
+    for day in (9, 3, 5):
+        s.add_detection(Detection(datetime(2026, 7, day, 6), "Erithacus rubecula",
+                                  "European Robin", 0.9))
+    assert s.listening_span() == ("2026-07-03", "2026-07-09")
+
+
+def test_day_profile_folds_a_day_into_species_quarter_hours(tmp_path):
+    s = Store(tmp_path / "db.sqlite")
+    robin, wren = ("Erithacus rubecula", "European Robin"), ("Troglodytes troglodytes", "Eurasian Wren")
+    s.add_detection(Detection(datetime(2026, 7, 5, 4, 2, 10), *robin, 0.7))
+    s.add_detection(Detection(datetime(2026, 7, 5, 4, 14, 50), *robin, 0.9))   # same 04:00 slot
+    s.add_detection(Detection(datetime(2026, 7, 5, 4, 15), *robin, 0.8))       # next slot
+    s.add_detection(Detection(datetime(2026, 7, 5, 23, 59), *wren, 0.6))
+    s.add_detection(Detection(datetime(2026, 7, 6, 4, 3), *robin, 0.99))       # another day
+    rows = {(r["common_name"], r["quarter"]): r for r in s.day_profile("2026-07-05")}
+    assert set(rows) == {("European Robin", 16), ("European Robin", 17), ("Eurasian Wren", 95)}
+    first = rows[("European Robin", 16)]
+    assert (first["n"], first["best"], first["first"], first["last"]) == (
+        2, 0.9, "2026-07-05T04:02:10", "2026-07-05T04:14:50")
+    assert first["scientific_name"] == "Erithacus rubecula"
+    assert s.day_profile("2026-07-04") == []
+
+
 def test_species_companions_respect_the_date_range(tmp_path):
     s = Store(tmp_path / "db.sqlite")
     robin, wren = ("Erithacus rubecula", "European Robin"), ("Troglodytes troglodytes", "Eurasian Wren")

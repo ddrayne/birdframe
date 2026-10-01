@@ -116,8 +116,11 @@ def _detection_payload(d):
 
 def create_app(ctx: AppContext) -> FastAPI:
     import threading as _threading
+    from birdframe.seasons import SeasonArchive
     app = FastAPI(title="birdframe")
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
+    # The archive folded day by day for the Seasons view, kept between visits.
+    app.state.seasons = None
 
     @app.middleware("http")
     async def refuse_cross_site_writes(request: Request, call_next):
@@ -611,6 +614,7 @@ def create_app(ctx: AppContext) -> FastAPI:
         if ctx.apply_settings:
             ctx.apply_settings()
         removed = ctx.store.delete_species(name)
+        _season_archive().clear()          # its history just changed
         return {"blocked": name, "removed_detections": removed}
 
     @app.post("/api/unblock")
@@ -833,6 +837,37 @@ def create_app(ctx: AppContext) -> FastAPI:
             "tier_counts": tier_counts,
             "life_list": included,
         }
+
+    def _season_archive() -> SeasonArchive:
+        """The folded archive for the configured place (the sun's hours
+        depend on it), rebuilt if the place has changed."""
+        place = (float(getattr(ctx.config, "latitude", 55.95)),
+                 float(getattr(ctx.config, "longitude", -3.19)))
+        archive = app.state.seasons
+        if archive is None or (archive.latitude, archive.longitude) != place:
+            archive = app.state.seasons = SeasonArchive(ctx.store, *place)
+        return archive
+
+    app.state.season_archive = _season_archive    # so startup can warm it
+
+    @app.get("/api/seasons")
+    def season_story():
+        """The long view: comings and goings, the chorus against the sun,
+        changing voices, notable visitors, records and a dated chronicle,
+        all derived from stored detections (see birdframe.seasons)."""
+        from birdframe.seasons import analyse
+        today = ctx.now().date()
+        story = analyse(_season_archive().profiles(today), today, ctx.geo_lookup)
+        with_clips = ctx.store.species_with_any_clip()
+        for group in (story["species"], story["visitors"]["notable"],
+                      story["visitors"]["doubtful"]):
+            for item in group:
+                name = item["common_name"]
+                item["clip_url"] = (f"/api/species-clip/{quote(name)}"
+                                    if name in with_clips else None)
+        story["place"] = getattr(ctx.config, "place_name", "") or "the window"
+        story["count_semantics"] = "BirdNET detection events/calls, not individual birds"
+        return story
 
     @app.get("/api/rankings")
     def rankings(metric: str = "detections",

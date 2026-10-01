@@ -437,6 +437,41 @@ def test_patterns_filters_reliability_layers_without_deleting_data(tmp_path):
     assert store.totals()["detections"] == 4
 
 
+def test_seasons_tells_the_long_view_and_forgets_purged_birds(tmp_path):
+    from datetime import datetime as _dt, timedelta as _td
+    store = Store(tmp_path / "db.sqlite")
+    start = _dt(2026, 7, 6, 6)
+    for day in range(40):
+        when = start + _td(days=day)
+        store.add_detection(Detection(when, "Erithacus rubecula", "European Robin", 0.9))
+        if day < 20:
+            store.add_detection(Detection(when, "Apus apus", "Common Swift", 0.9))
+    store.add_detection(Detection(start, "Podiceps cristatus", "Great Crested Grebe", 0.81))
+    store.upsert_clip("2026-07-06", "Common Swift", "Apus apus", 0.9,
+                      str(tmp_path / "swift.ogg"), start)
+    ctx = AppContext(store=store, artist=FakeArtist(tmp_path / "i.png"),
+                     publisher=FakePublisher(), now=lambda: _dt(2026, 8, 15, 12),
+                     config=Config.load(tmp_path / "c.toml"),
+                     geo_lookup={"Erithacus rubecula": 0.95, "Apus apus": 0.8,
+                                 "Podiceps cristatus": 0.04})
+    client = TestClient(create_app(ctx))
+    story = client.get("/api/seasons").json()
+    status = {s["common_name"]: s["status"] for s in story["species"]}
+    assert status == {"Common Swift": "departed", "European Robin": "resident"}
+    swift = story["species"][0]
+    assert swift["clip_url"] == "/api/species-clip/Common%20Swift"
+    assert story["visitors"]["doubtful"][0]["common_name"] == "Great Crested Grebe"
+    assert story["since"] == "2026-07-06" and story["listening_days"] == 40
+    assert len(story["clock"]) == 40 and len(story["clock"][0]["q"]) == 96
+    assert story["count_semantics"].startswith("BirdNET detection events")
+    assert any("Common Swift has not been heard since 25 July" in line
+               for line in story["story"])
+
+    client.post("/api/block", json={"name": "Common Swift"})
+    after = client.get("/api/seasons").json()
+    assert [s["common_name"] for s in after["species"]] == ["European Robin"]
+
+
 def test_health_endpoint(tmp_path):
     _, ctx, client = _client(tmp_path)
     h = client.get("/api/health").json()

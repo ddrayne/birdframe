@@ -13,6 +13,9 @@ def _transport(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"date": "2026-07-20", "species": []})
     if request.url.path == "/api/census":
         return httpx.Response(200, json={"totals": {"detections": 12}})
+    if request.url.path == "/api/seasons":
+        return httpx.Response(200, json={"story": ["Since 6 July…"], "clock": [{"q": [0] * 96}],
+                                         "light": {"offset": -60, "days": [{"day": "x"}]}})
     if request.url.path == "/api/rankings":
         return httpx.Response(200, json={
             "metric": request.url.params.get("metric"),
@@ -30,11 +33,13 @@ def test_mcp_exposes_read_only_analysis_tools_and_resources():
         names = {tool.name for tool in tools}
         assert {"get_birds_now", "query_detections", "wait_for_detections",
                 "rank_birds", "compare_periods", "get_species", "get_day",
-                "get_census", "get_best_clip"} <= names
+                "get_census", "get_best_clip", "get_season_story"} <= names
         assert not ({"post", "generate", "settings"} & names)
         assert all(tool.annotations.readOnlyHint is True for tool in tools)
         result = await server.call_tool("rank_birds", {"metric": "detections"})
         assert json.loads(result[0].text)["rankings"][0]["common_name"] == "European Robin"
+        season = json.loads((await server.call_tool("get_season_story", {}))[0].text)
+        assert season == {"story": ["Since 6 July…"], "light": {"offset": -60}}
         resources = {str(resource.uri) for resource in await server.list_resources()}
         assert {"birdframe://now", "birdframe://today", "birdframe://census"} <= resources
         content = list(await server.read_resource("birdframe://now"))
