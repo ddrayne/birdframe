@@ -1,5 +1,10 @@
 # Paste into a Coolify Docker Compose resource. Set the web service's domain
 # to https://birds.apps.drayne.xyz (container port 80).
+# The recording computer runs Birdframe and uploads this folder over rsync.
+# Production cadence: public_refresh_minutes = 5 and public_upload_minutes = 5
+# in that computer's config.toml. Coolify serves files; it does not collect data.
+# GitHub pushes alone do not update the running recorder or its public export.
+# See README.md, "How public updates work", for dependencies and status checks.
 services:
   web:
     image: nginx:1.29-alpine

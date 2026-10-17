@@ -182,6 +182,16 @@ hard-veto a species via the "not here" blocklist (`config.blocked_species`).
   deploy` (Node 22+). The token goes only in Wrangler's environment, never in
   argv. `public_*`/`cloudflare_*` settings are config-file only (the
   LAN dashboard must never choose a folder to write or a command to run).
+  **The deployed `birds.apps.drayne.xyz` site uses five minutes for both
+  `public_refresh_minutes` and `public_upload_minutes`; retain this cadence.**
+  The running recording Mac builds and pushes files over restricted rsync;
+  Coolify/nginx only serves the persistent export. A GitHub push alone does
+  not update the app checkout or publish bird data. Open public pages poll
+  `version.json` every minute, postponing reload during audio playback/replay.
+  Quiet periods skip unchanged uploads; source downtime leaves the last
+  snapshot online. Operational details and checks are in README.md under
+  **How public updates work**. Do not confuse repository defaults with these
+  production overrides.
   `public_insights.py` turns public aggregate facts into source-linked field notes
   and guided questions. Optional `public_insights = true` uses the OpenAI key
   locally with structured output, no tools, a persisted six-hour attempt limit

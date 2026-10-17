@@ -240,6 +240,68 @@ uv run birdframe publish ~/Sites/birdframe      # build it once, then preview:
 python3 -m http.server --directory ~/Sites/birdframe 8356
 ```
 
+### How public updates work
+
+The deployed site at **[birds.apps.drayne.xyz](https://birds.apps.drayne.xyz/)**
+uses a **five-minute build and upload cadence**. Birdframe on the recording Mac
+is the source of updates; Hetzner serves the exported files through Coolify and
+nginx. Coolify does not collect bird data or pull the live records from GitHub.
+
+1. The running Mac app listens continuously and saves detections to its local
+   SQLite database, analysing audio in approximately 15-second chunks.
+2. Its background public-site publisher rebuilds the read-only export about
+   every five minutes, including bird counts, daily records and saved clips.
+3. When the content changes, the configured restricted SSH/rsync uploader sends
+   changed files to `/srv/birdframe/public` on Hetzner. Ordinary data uploads
+   have a five-minute minimum gap. New paintings bypass that gap.
+4. An open public page checks `version.json` every minute and reloads when its
+   version changes. It also checks when the tab becomes visible again. Refresh
+   waits while a visitor is playing a recording or running the day replay.
+
+New detections normally appear after the next publishing cycle, plus the build
+and transfer time and up to a minute for an already-open browser to check.
+These are periodic snapshots, not a continuous microphone stream. The cadence
+is best-effort: a busy renderer or a slow network can delay a publishing cycle.
+
+The production settings live on the recording computer in
+`~/.config/birdframe/config.toml`:
+
+```toml
+public_refresh_minutes = 5
+public_upload_minutes = 5
+```
+
+Restart Birdframe after changing these settings (`uv run birdframe restart`
+for an installed service). Repository defaults remain an hourly build and a
+six-hour minimum data-upload gap; the production settings above override them.
+Generated field notes have a separate six-hour request limit. That does not
+slow the five-minute updates to measured bird data or recordings.
+
+**What must stay running.** The recording Mac needs power, a working microphone,
+the Birdframe app and internet access for fresh public data. `uv run birdframe
+install` installs the macOS LaunchAgent, which starts the app at login and
+restarts it if it exits. While running, Birdframe uses `caffeinate` to prevent
+idle system sleep. Hetzner/Coolify must also be available to receive and serve
+the export. If the Mac is stopped or offline, the public website remains
+available with its last successful snapshot, but cannot acquire new records.
+
+**Quiet periods and failures.** Unchanged content is not uploaded, so an older
+public snapshot timestamp can be normal when no new bird data has arrived.
+The local build time can advance without the last upload time changing. A
+failed build or upload leaves the last successful public files available and
+backs off for 30 minutes before retrying. The last successful upload is saved
+in `~/.local/share/birdframe/public-site.json`, so restarting the app does not
+cause duplicate uploads.
+
+**Checking and publishing.** The local dashboard's **Settings → Public site**
+shows the last build, last upload and any error. `GET /api/public` exposes the
+same status; `GET /api/health` also reports recorder health. **Publish now** (or
+`POST /api/public/publish`) requests a background build and upload. From the
+recording computer, `uv run birdframe publish` builds and uploads once; adding
+a folder argument only builds a local preview. Committing or pushing to
+GitHub alone does not publish bird data or update the running Mac checkout.
+After deploying new app code to that checkout, restart the app and publish.
+
 ### Optional generated field notes
 
 Set `public_insights = true` to use the existing OpenAI key for short field notes.
@@ -280,7 +342,7 @@ which hosts static sites free and doesn't limit visits:
    `uv run birdframe publish`. The first publish creates the project and prints
    its address. After that, restart birdframe and it keeps the site current.
 
-**When it uploads.** Each new painting goes up straight away. Other changes,
+**Default upload schedule.** Each new painting goes up straight away. Other changes,
 such as more birds heard, go up at most every six hours. A restart doesn't
 trigger an upload, and after a failed upload birdframe waits half an hour
 before trying again. Wrangler sends only the files Cloudflare doesn't already
