@@ -942,7 +942,14 @@ class Store:
             "SELECT common_name, MIN(scientific_name) AS scientific_name,"
             " CAST(substr(ts,12,2) AS INTEGER) * 4"
             " + CAST(substr(ts,15,2) AS INTEGER) / 15 AS quarter,"
-            " COUNT(*) AS n, MAX(confidence) AS best, MIN(ts) AS first, MAX(ts) AS last"
+            " COUNT(*) AS n, MAX(confidence) AS best, MIN(ts) AS first, MAX(ts) AS last,"
+            " SUM(confidence) AS confidence_sum,"
+            + ",".join(f"SUM(CASE WHEN MIN(9, MAX(0, CAST(confidence * 10 AS INTEGER))) = {i}"
+                       f" THEN 1 ELSE 0 END) AS c{i}" for i in range(10)) + ","
+            " COUNT(snr_db) AS snr_n, SUM(snr_db) AS snr_sum, MAX(snr_db) AS snr_best,"
+            " COUNT(rms_dbfs) AS level_n, SUM(rms_dbfs) AS level_sum,"
+            " MAX(peak_dbfs) AS peak_best, COUNT(noise_floor_dbfs) AS noise_n,"
+            " SUM(noise_floor_dbfs) AS noise_sum"
             " FROM detections WHERE day = ? GROUP BY common_name, quarter",
             (day,),
         ).fetchall()

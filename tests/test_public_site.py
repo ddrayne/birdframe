@@ -288,3 +288,24 @@ def test_public_seasons_reuse_filtered_profiles_without_coordinates(tmp_path):
     assert set(season['statuses']) == {'European Robin'}
     for private in ('55.95', '-3.19', 'Podiceps', 'Great Crested Grebe', 'geo'):
         assert private not in json.dumps(season)
+
+
+def test_public_acoustic_aggregates_weight_each_measured_detection(tmp_path):
+    store, out = _archive(tmp_path), tmp_path / 'site'
+    for minute, snr, level, peak, noise in [(15, 2, -20, -10, -22),
+                                           (30, 10, -30, -20, -40),
+                                           (31, 20, -24, -15, -44)]:
+        store.add_detection(Detection(datetime(2026, 7, 5, 6, minute), 'Erithacus rubecula',
+                                      'European Robin', .8, snr_db=snr, rms_dbfs=level,
+                                      peak_dbfs=peak, noise_floor_dbfs=noise))
+    build_site(store, STYLES, out, geo_lookup=GEO)
+    bird = _data(out)['species'][0]
+    assert bird['meanConfidence'] == .888
+    assert bird['confidenceDistribution'][8:] == [3, 7]
+    assert bird['acoustics'] == {'measurements': 3, 'meanSNR': 10.67, 'bestSNR': 20,
+                                  'meanLevel': -24.67, 'peakLevel': -10, 'meanNoise': -35.33}
+    day = json.loads((out / 'daily/2026-07-05.json').read_text())
+    assert day['birds'][0]['acoustics']['meanSNR'] == 10.67
+    csv = (out / 'species.csv').read_text()
+    assert 'Mean SNR dB' in csv and 'European Robin' in csv
+    assert 'Great Crested Grebe' not in csv

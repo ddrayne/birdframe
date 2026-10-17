@@ -55,6 +55,8 @@ DEFAULTS = {
     "public_site_url": "",         # where it is hosted, for link previews (optional)
     "public_site_title": "",       # "" = "The <place_name> Window"
     "public_deploy_command": "",   # run after each build; {dir} is the built folder
+    "public_insights_model": "gpt-5.6-luna",
+    "public_insights": False,      # optional cached OpenAI field notes (at most one attempt / 6h)
     "public_audio": False,         # opt in to publishing saved bird clips (includes background sound)
     "public_refresh_minutes": 60,  # rebuild bird data; paintings always trigger a build
     "public_upload_minutes": 360,  # minimum gap for data uploads; paintings go at once
@@ -108,6 +110,8 @@ class Config:
     public_site_url: str
     public_site_title: str
     public_deploy_command: str
+    public_insights_model: str
+    public_insights: bool
     public_audio: bool
     public_refresh_minutes: float
     public_upload_minutes: float

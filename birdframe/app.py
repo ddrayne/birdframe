@@ -278,6 +278,16 @@ def _site_deploy(config: Config, out_dir: Path):
 
 
 def _site_builder(store, styles, config: Config, out_dir: Path, deploy, geo: dict):
+    insight_writer = None
+    if config.public_insights:
+        from birdframe.public_insights import field_notes
+        from openai import OpenAI
+        key = secrets.get_key("openai")
+        client = OpenAI(api_key=key, timeout=20, max_retries=0) if key else None
+        insight_writer = lambda site: field_notes(
+            site, DATA_DIR / "public-field-notes.json", client=client,
+            model=config.public_insights_model)
+
     def build() -> dict:
         from birdframe.public_site import build_site
         base_url = config.public_site_url
@@ -290,7 +300,8 @@ def _site_builder(store, styles, config: Config, out_dir: Path, deploy, geo: dic
                           title=config.public_site_title, base_url=base_url, geo_lookup=geo,
                           refresh_minutes=config.public_refresh_minutes,
                           photo_cache=DATA_DIR / "public-bird-photos", public_audio=config.public_audio,
-                          latitude=config.latitude, longitude=config.longitude)
+                          latitude=config.latitude, longitude=config.longitude,
+                          insight_writer=insight_writer)
     return build
 
 

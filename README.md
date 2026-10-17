@@ -203,6 +203,10 @@ recent changes in activity. The daybook opens every recorded day with a
 quarter-hour replay, a scrubber, complete species roll call and CSV download.
 Searchable bird profiles include confidence, daily histories and shared
 recorded days; compare up to three species' daily rhythms side by side.
+**Explore** starts with guided questions, then opens a searchable, sortable
+species dataset and CSV export. Confidence distributions and measured signal
+levels / signal-to-noise ratios add the acoustic detail; these are digital
+recorder measurements, not physical loudness or counts of individual birds.
 Real reference photographs, with Wikimedia photographer and license credits,
 bring each species to life. Dawn timing, night voices, activity trends,
 life-list milestones and a dated chronicle reveal the long view, while
@@ -235,6 +239,20 @@ prevent the public site from building.
 uv run birdframe publish ~/Sites/birdframe      # build it once, then preview:
 python3 -m http.server --directory ~/Sites/birdframe 8356
 ```
+
+### Optional generated field notes
+
+Set `public_insights = true` to use the existing OpenAI key for short field notes.
+Only the public aggregate facts are sent. The model selects evidence IDs and
+writes brief observational text; headings, counts, dates and evidence links come from code. The
+same measured facts also power the guided questions, with no model required.
+Generated notes use structured output, reject unknown evidence IDs and numeric
+claims in the prose, and fall back to data-derived text if unavailable. Results
+are cached on the recorder, with a persisted six-hour minimum between attempts
+(including failures); open public pages never make model requests or receive a
+key. If evidence changes during that interval, only notes with unchanged
+supporting evidence are reused. The model is configured with `public_insights_model` (default `gpt-5.6-luna`).
+Changing the configured model starts a separate six-hour attempt window.
 
 ### Free hosting on Cloudflare Pages
 

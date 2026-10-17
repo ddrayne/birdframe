@@ -182,6 +182,12 @@ hard-veto a species via the "not here" blocklist (`config.blocked_species`).
   deploy` (Node 22+). The token goes only in Wrangler's environment, never in
   argv. `public_*`/`cloudflare_*` settings are config-file only (the
   LAN dashboard must never choose a folder to write or a command to run).
+  `public_insights.py` turns public aggregate facts into source-linked field notes
+  and guided questions. Optional `public_insights = true` uses the OpenAI key
+  locally with structured output, no tools, a persisted six-hour attempt limit
+  (including failures), and a data-derived fallback. Model prose never supplies
+  the displayed numeric evidence; cached notes are used only against unchanged
+  facts. No key or model endpoint goes into the public site.
   `public_data.py` reads indexed quarter-hour day profiles one day at a time,
   releasing the detector lock between calls. It exports lazy `daily/<date>.json`
   files; never publish raw events to power the replay.

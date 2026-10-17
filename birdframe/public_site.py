@@ -9,6 +9,7 @@ confirmed and probable species appear).
 """
 from __future__ import annotations
 
+import csv
 import hashlib
 import html
 import io
@@ -177,7 +178,7 @@ def build_site(store, styles, out_dir: Path, *, place: str = "Edinburgh",
                now: datetime | None = None, refresh_minutes: float = 60,
                photo_cache: Path | None = None,
                latitude: float | None = None, longitude: float | None = None,
-               public_audio: bool = False) -> dict:
+               public_audio: bool = False, insight_writer: Callable | None = None) -> dict:
     """Write (or refresh) the public site in `out_dir` and return a summary.
 
     Incremental: paintings already encoded are reused, and files for
@@ -306,6 +307,24 @@ def build_site(store, styles, out_dir: Path, *, place: str = "Edinburgh",
     if photo_cache is not None:
         from birdframe.bird_photos import enrich_species
         enrich_species(species, photo_cache, out_dir)
+
+    from birdframe.public_insights import field_notes
+    site['fieldNotes'] = insight_writer(site) if insight_writer else field_notes(site)
+
+    csv_out = io.StringIO()
+    writer = csv.writer(csv_out)
+    writer.writerow(['Species', 'Scientific name', 'Detections', 'Recorded days', 'First record',
+                     'Last record', 'Tier', 'Best confidence', 'Mean confidence',
+                     'Acoustic measurements', 'Mean SNR dB', 'Best SNR dB', 'Mean level dBFS',
+                     'Peak level dBFS', 'Mean noise dBFS'])
+    for bird in species:
+        acoustic = bird['acoustics']
+        writer.writerow([bird['name'], bird['scientific'], bird['count'], bird['days'],
+                         bird['first'], bird['last'], bird['tier'], bird['confidence'],
+                         bird['meanConfidence'], acoustic['measurements'], acoustic['meanSNR'],
+                         acoustic['bestSNR'], acoustic['meanLevel'], acoustic['peakLevel'],
+                         acoustic['meanNoise']])
+    _write_atomic(out_dir / 'species.csv', csv_out.getvalue().encode())
 
     # The shell: template + data, with assets fingerprinted for caching.
     assets = {}
