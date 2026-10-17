@@ -287,7 +287,10 @@ def _site_builder(store, styles, config: Config, out_dir: Path, deploy, geo: dic
             except Exception as exc:
                 log.warning("Couldn't look up the public site's address: %s", exc)
         return build_site(store, styles, out_dir, place=config.place_name,
-                          title=config.public_site_title, base_url=base_url, geo_lookup=geo)
+                          title=config.public_site_title, base_url=base_url, geo_lookup=geo,
+                          refresh_minutes=config.public_refresh_minutes,
+                          photo_cache=DATA_DIR / "public-bird-photos", public_audio=config.public_audio,
+                          latitude=config.latitude, longitude=config.longitude)
     return build
 
 

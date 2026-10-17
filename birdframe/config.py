@@ -55,6 +55,7 @@ DEFAULTS = {
     "public_site_url": "",         # where it is hosted, for link previews (optional)
     "public_site_title": "",       # "" = "The <place_name> Window"
     "public_deploy_command": "",   # run after each build; {dir} is the built folder
+    "public_audio": False,         # opt in to publishing saved bird clips (includes background sound)
     "public_refresh_minutes": 60,  # rebuild bird data; paintings always trigger a build
     "public_upload_minutes": 360,  # minimum gap for data uploads; paintings go at once
     # Or publish to Cloudflare Pages (free); the API token is a stored key,
@@ -107,6 +108,7 @@ class Config:
     public_site_url: str
     public_site_title: str
     public_deploy_command: str
+    public_audio: bool
     public_refresh_minutes: float
     public_upload_minutes: float
     cloudflare_project: str

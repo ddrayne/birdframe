@@ -3,7 +3,7 @@
 `build_site` renders the local archive into a folder of HTML, CSS, JS, JSON
 and WebP images that any static host can serve (GitHub Pages, Cloudflare
 Pages, Netlify, a Raspberry Pi). Nothing on it can write back to birdframe,
-and it leaves out what shouldn't leave the house: coordinates, audio, raw
+and it leaves out what shouldn't leave the house: coordinates and raw
 detections, the frame's address, and doubtful identifications (only
 confirmed and probable species appear).
 """
@@ -26,6 +26,7 @@ from typing import Callable
 
 from PIL import Image, features
 
+from birdframe.public_data import day_version, observatory_data, season_data
 from birdframe.reliability import GEO_DEFAULT, assess, is_reliable, rarity_label
 from birdframe.rollup import CHARACTER_PHRASES
 from birdframe.styles import slugify
@@ -39,6 +40,10 @@ IMAGE_WIDTHS = (480, 960, 1200)
 # fetched with a content version. The page itself is always revalidated.
 HEADERS_FILE = """\
 /images/*
+  Cache-Control: public, max-age=31536000, immutable
+/audio/*
+  Cache-Control: public, max-age=31536000, immutable
+/birds/*
   Cache-Control: public, max-age=31536000, immutable
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
@@ -154,7 +159,7 @@ def _highlights(species: list[dict], paintings: list[dict], days: list[dict],
         note("Often painted", muse, "In every painting so far" if count == len(paintings)
              else f"In {count} of {len(paintings)} paintings")
     newest = best(lambda s: (s["first"], s["name"]))
-    note("Newest arrival", newest, f"First heard on {_on(newest['first'])}" if newest else "")
+    note("Newest first record", newest, f"First heard on {_on(newest['first'])}" if newest else "")
     if have_geo:
         rarest = best(lambda s: (-s["geo"], s["name"]))
         if rarest and rarest["geo"] < 0.30:
@@ -169,7 +174,10 @@ def _highlights(species: list[dict], paintings: list[dict], days: list[dict],
 
 def build_site(store, styles, out_dir: Path, *, place: str = "Edinburgh",
                title: str = "", base_url: str = "", geo_lookup: dict | None = None,
-               now: datetime | None = None) -> dict:
+               now: datetime | None = None, refresh_minutes: float = 60,
+               photo_cache: Path | None = None,
+               latitude: float | None = None, longitude: float | None = None,
+               public_audio: bool = False) -> dict:
     """Write (or refresh) the public site in `out_dir` and return a summary.
 
     Incremental: paintings already encoded are reused, and files for
@@ -187,7 +195,8 @@ def build_site(store, styles, out_dir: Path, *, place: str = "Edinburgh",
     species = []
     for row in store.life_list():
         geo = geo_lookup.get(row["scientific_name"], GEO_DEFAULT)
-        if not is_reliable(assess(row["best"], geo, row["total"])):
+        assessment = assess(row["best"], geo, row["total"])
+        if not is_reliable(assessment):
             continue
         rhythm = hours.get(row["common_name"]) or [0] * 24
         top = max(rhythm) or 1
@@ -197,6 +206,9 @@ def build_site(store, styles, out_dir: Path, *, place: str = "Edinburgh",
             "last": row["last_day"], "days": row["days"], "peak": row["peak_hour"],
             "rhythm": [round(value / top, 3) for value in rhythm],
             "rarity": rarity_label(geo), "geo": round(geo, 3),
+            "count": row["total"], "confidence": round(row["best"], 3),
+            "tier": assessment.tier, "reasons": assessment.reasons,
+            "earliest": row["earliest"], "latest": row["latest"], "hours": rhythm,
         })
     names = {s["name"] for s in species}
 
@@ -207,9 +219,27 @@ def build_site(store, styles, out_dir: Path, *, place: str = "Edinburgh",
     span = (date.fromisoformat(max(listening)) - start).days + 1 if listening else 0
     for s in species:
         s["presence"] = _presence(heard.get(s["name"], []), start, span)
-    activity = {row["day"]: row["hours"] for row in store.activity_matrix(days=366)}
-    day_birds: dict[str, int] = Counter(
-        day for name in names for day in heard.get(name, []))
+    profiles = []
+    sun_lookup = None
+    if latitude is not None and longitude is not None:
+        from birdframe.seasons import sun_for
+        sun_lookup = lambda day: sun_for(date.fromisoformat(day), latitude, longitude)
+    daily_summaries, daily_payloads = observatory_data(
+        store, species, listening, profiles=profiles, sun_lookup=sun_lookup)
+    # Audio is an explicit owner choice; metadata and files are pruned when off.
+    from birdframe.public_audio import export_recordings
+    audio_count = export_recordings(store, species if public_audio else [],
+                                   daily_payloads if public_audio else {}, out_dir)
+    daily_by_date = {row["day"]: row for row in daily_summaries}
+    day_versions = {}
+    daily_dir = out_dir / "daily"
+    for day, payload in daily_payloads.items():
+        day_versions[day] = day_version(payload)
+        _write_atomic(daily_dir / f"{day}.json", json.dumps(payload, separators=(",", ":")).encode())
+    if daily_dir.exists():
+        for stale in daily_dir.glob("*.json"):
+            if stale.stem not in daily_payloads:
+                stale.unlink()
 
     images_dir = out_dir / "images"
     art_dir = out_dir / "art"
@@ -241,13 +271,14 @@ def build_site(store, styles, out_dir: Path, *, place: str = "Edinburgh",
     for p in paintings:
         by_day.setdefault(p["day"], []).append(p["id"])
     days = []
+    by_slug = {bird["slug"]: bird for bird in species}
     for row in journal:
-        top_hour = max(activity.get(row["day"], [0])) or 1
-        days.append({
-            "day": row["day"], "species": day_birds.get(row["day"], 0),
-            "top": [s["common_name"] for s in row["top_species"] if s["common_name"] in names][:4],
+        daily = daily_by_date[row["day"]]
+        top_hour = max(daily["hours"]) or 1
+        days.append({**daily,
+            "top": [by_slug[slug]["name"] for slug in daily["top"]],
             "new": [name for name in row["new_species"] if name in names],
-            "rhythm": [round(v / top_hour, 3) for v in activity.get(row["day"], [0] * 24)],
+            "rhythm": [round(value / top_hour, 3) for value in daily["hours"]],
             "paintings": by_day.get(row["day"], []),
         })
 
@@ -262,9 +293,19 @@ def build_site(store, styles, out_dir: Path, *, place: str = "Edinburgh",
         "highlights": _highlights(species, paintings, days, store.dawn_openers(),
                                   have_geo=bool(geo_lookup)),
         "paintings": paintings, "species": species, "days": days,
+        "dayVersions": day_versions, "today": now.date().isoformat(),
+        "refreshMinutes": max(1, refresh_minutes),
+        "totalDetections": sum(bird["count"] for bird in species),
+        "recordingCount": audio_count,
+        "hours": [sum(bird["hours"][h] for bird in species) for h in range(24)],
+        "season": season_data(profiles, now.date(), geo_lookup) if profiles else None,
     }
     for s in species:
         s.pop("geo")                       # used for highlights only
+
+    if photo_cache is not None:
+        from birdframe.bird_photos import enrich_species
+        enrich_species(species, photo_cache, out_dir)
 
     # The shell: template + data, with assets fingerprinted for caching.
     assets = {}

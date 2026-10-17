@@ -164,10 +164,15 @@ hard-veto a species via the "not here" blocklist (`config.blocked_species`).
   and ES modules are served `Cache-Control: no-cache` (modules are imported
   without version stamps); bump `?v=` in `index.html`/`sw.js` with UI changes.
 - **Public site** (`public_site.py`, `public_template/`, `birdframe publish`):
-  a static, read-only edition built from aggregates only: confirmed/probable
-  species, real paintings (no fallback posters), no audio, coordinates, raw
-  detections or frame address. `SitePublisher` rebuilds it on its own thread
-  after new paintings and hourly. Uploads (`public_deploy_command`, or
+  a static, read-only observatory built from aggregates only: confirmed/probable
+  species, real paintings (no fallback posters), no coordinates or raw
+  detections or frame address. `public_audio = true` explicitly opts in to saved
+  best-of-day bird recordings (including background sound); default off. The
+  public listening room, profiles and daybook expose dated playback, never a live
+  microphone. `bird_photos.py` caches attributed Wikimedia reference photos;
+  `public_audio.py` exports content-addressed OGGs and lazy per-bird clip indexes. `SitePublisher` rebuilds it on its own thread
+  after new paintings and hourly by default (`public_refresh_minutes` configures
+  the build interval, `public_upload_minutes` the data-upload interval). Uploads (`public_deploy_command`, or
   Cloudflare Pages via `cloudflare.py`) follow a stricter schedule: a new
   painting goes up at once, other changes (the build's `fingerprint`) at most
   every 6h, failures back off 30 min, and the last upload is persisted in
@@ -177,6 +182,9 @@ hard-veto a species via the "not here" blocklist (`config.blocked_species`).
   deploy` (Node 22+). The token goes only in Wrangler's environment, never in
   argv. `public_*`/`cloudflare_*` settings are config-file only (the
   LAN dashboard must never choose a folder to write or a command to run).
+  `public_data.py` reads indexed quarter-hour day profiles one day at a time,
+  releasing the detector lock between calls. It exports lazy `daily/<date>.json`
+  files; never publish raw events to power the replay.
   Routes are plain anchors (`#birds`, `#p-<id>`, `#b-<slug>`, `#frame`).
   `frame_url = ""` disables the frame cleanly (`Publisher.enabled`).
 - **Dashboard images**: lists use `/api/image/{id}?w=` (cached JPEGs in

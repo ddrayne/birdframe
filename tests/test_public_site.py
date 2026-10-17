@@ -210,3 +210,81 @@ def test_publisher_records_a_failed_build_without_raising():
     publisher = SitePublisher(boom, latest=lambda: 1)
     assert publisher.run_once() == {}
     assert publisher.status["error"] == "disk full" and not publisher.status["running"]
+
+
+def test_observatory_totals_and_lazy_day_files_exclude_doubtful_species(tmp_path):
+    store, out = _archive(tmp_path), tmp_path / 'site'
+    build_site(store, STYLES, out, geo_lookup=GEO, now=datetime(2026, 7, 6, 22))
+    data = _data(out)
+    assert data['totalDetections'] == 7
+    robin = data['species'][0]
+    assert robin['count'] == 7 and robin['tier'] == 'confirmed'
+    assert robin['confidence'] == 0.93
+    assert robin['history'] == [['2026-07-05', 6], ['2026-07-06', 1]]
+    assert robin['hours'][6] == 6 and robin['hours'][7] == 1
+    assert sum(day['count'] for day in data['days']) == data['totalDetections']
+    day = json.loads((out / 'daily' / '2026-07-05.json').read_text())
+    assert day['count'] == 6 and day['species'] == 1
+    assert day['quarters'][24] == 6 and day['richness'][24] == 1
+    assert day['voices'] == [[24, 'european-robin', 6]]
+    assert day['birds'][0]['first'] == '06:00'
+    assert day['birds'][0]['last'] == '06:05'
+    assert len(day['quarters']) == len(day['richness']) == 96
+    published = (out / 'index.html').read_text() + ''.join(p.read_text() for p in (out / 'daily').glob('*.json'))
+    for private in ('Podiceps', 'great-crested-grebe', 'Great Crested Grebe', 'clip.ogg', '2026-07-05T06:00:00'):
+        assert private not in published
+    assert set(data['dayVersions']) == {'2026-07-05', '2026-07-06'}
+
+
+def test_removed_days_are_removed_from_the_public_export(tmp_path):
+    store, out = _archive(tmp_path), tmp_path / 'site'
+    build_site(store, STYLES, out, geo_lookup=GEO)
+    assert (out / 'daily' / '2026-07-06.json').exists()
+    store.delete_species('European Robin')
+    build_site(store, STYLES, out, geo_lookup=GEO)
+    assert not (out / 'daily' / '2026-07-06.json').exists()
+    assert _data(out)['totalDetections'] == 0
+
+
+def test_public_recordings_are_opt_in_filtered_and_removed_when_disabled(tmp_path):
+    import numpy as np
+    import soundfile as sf
+    store, out = _archive(tmp_path), tmp_path / 'site'
+    path = tmp_path / 'private-recording.ogg'
+    sf.write(path, np.zeros(16000), 16000, format='OGG', subtype='VORBIS')
+    for name, scientific in [('European Robin', 'Erithacus rubecula'),
+                             ('Great Crested Grebe', 'Podiceps cristatus')]:
+        store.upsert_clip('2026-07-05', name, scientific, .93, str(path),
+                          datetime(2026, 7, 5, 6, 1, 23))
+    build_site(store, STYLES, out, geo_lookup=GEO)
+    assert _data(out)['recordingCount'] == 0
+    assert not list((out / 'audio').glob('*'))
+    build_site(store, STYLES, out, geo_lookup=GEO, public_audio=True)
+    data = _data(out)
+    assert data['recordingCount'] == 1
+    bird = data['species'][0]
+    assert bird['clipCount'] == 1 and bird['clip']['duration'] == 1.0
+    assert (out / bird['clip']['url']).read_bytes() == path.read_bytes()
+    day = json.loads((out / 'daily/2026-07-05.json').read_text())
+    assert day['birds'][0]['clip'] == bird['clip']
+    clips = json.loads((out / bird['recordings'].split('?')[0]).read_text())
+    assert clips == [bird['clip']]
+    published = (out / 'index.html').read_text() + json.dumps(day) + json.dumps(clips)
+    for private in (str(path), '06:01:23', 'Great Crested Grebe'):
+        assert private not in published
+    build_site(store, STYLES, out, geo_lookup=GEO, public_audio=False)
+    assert not list((out / 'audio').glob('*'))
+    assert not list((out / 'recordings').glob('*'))
+    assert 'clip' not in _data(out)['species'][0]
+
+
+def test_public_seasons_reuse_filtered_profiles_without_coordinates(tmp_path):
+    store, out = _archive(tmp_path), tmp_path / 'site'
+    build_site(store, STYLES, out, geo_lookup=GEO, latitude=55.95, longitude=-3.19,
+               now=datetime(2026, 7, 6, 22))
+    season = _data(out)['season']
+    assert season['growth']['points'][-1]['total'] == 1
+    assert season['records']['busiest_day']['detections'] == 6
+    assert set(season['statuses']) == {'European Robin'}
+    for private in ('55.95', '-3.19', 'Podiceps', 'Great Crested Grebe', 'geo'):
+        assert private not in json.dumps(season)

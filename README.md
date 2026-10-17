@@ -196,18 +196,40 @@ If the model crashes at startup on a Pi 5, add `kernel=kernel8.img` to
 
 ## A public edition of the journal
 
-birdframe can publish a read-only website of your paintings and birds that
-anyone can visit: the latest painting hung like a print, notes on the season,
-the whole collection by month, a page per bird with a 24-hour "day clock" of
-when it sings, and a week-by-week chart of the season. **Frame mode**
-(`…/#frame`) shows the latest painting full screen, so any old tablet becomes
-a picture frame without an Inky display.
+birdframe publishes a colourful, interactive bird observatory alongside its
+painting collection. The home page shows the latest day's activity dial,
+all-time detections, hourly rhythms, a clickable day-by-hour heatmap, and
+recent changes in activity. The daybook opens every recorded day with a
+quarter-hour replay, a scrubber, complete species roll call and CSV download.
+Searchable bird profiles include confidence, daily histories and shared
+recorded days; compare up to three species' daily rhythms side by side.
+Real reference photographs, with Wikimedia photographer and license credits,
+bring each species to life. Dawn timing, night voices, activity trends,
+life-list milestones and a dated chronicle reveal the long view, while
+**Frame mode** (`…/#frame`) turns any tablet into a picture frame.
 
+Charts use real aggregates. Counts are acoustic detections, not estimates of
+individual birds; a quiet interval can also mean noise or a recording gap.
+Motion respects the visitor's reduced-motion preference. Detailed day records
+load on demand, keeping the initial page small.
 It is a static site: HTML, CSS, JSON and WebP images that any static host can
 serve (Cloudflare Pages, GitHub Pages, Netlify, a Raspberry Pi). Nothing on it
 can write back to birdframe, and it leaves out what shouldn't leave the house:
-coordinates, audio, raw detections, the frame's address, and doubtful
+coordinates, raw detections, the frame's address, and doubtful
 identifications (only confirmed and probable birds appear).
+
+Saved bird recordings can be published with `public_audio = true` in the
+config file (off by default). This shares the best saved short clip per
+species/day, including any background sound in that clip. The listening room
+opens one clear recording per species; bird profiles browse every saved day,
+and the daybook offers inline playback. Audio loads only when a visitor presses
+play, and a better recording gets a new content-addressed URL. Turning the
+setting off removes the exported recordings on the next build and upload.
+
+Photographs and short Wikipedia introductions are cached locally, with their
+source, author and license credits. Each build resolves at most two missing
+species, off the detector thread. Failed lookups retry the next day and never
+prevent the public site from building.
 
 ```sh
 uv run birdframe publish ~/Sites/birdframe      # build it once, then preview:
