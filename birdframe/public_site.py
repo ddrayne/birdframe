@@ -21,7 +21,7 @@ import subprocess
 import threading
 import time
 from collections import Counter
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -52,6 +52,8 @@ HEADERS_FILE = """\
   Cache-Control: public, max-age=86400
 /version.json
   Cache-Control: no-cache
+/freshness.json
+  Cache-Control: no-store
 """
 
 
@@ -288,6 +290,7 @@ def build_site(store, styles, out_dir: Path, *, place: str = "Edinburgh",
     site = {
         "title": title, "place": place, "url": base_url.rstrip("/"),
         "generated": now.isoformat(timespec="minutes"),
+        "builtAt": now.astimezone(timezone.utc).isoformat(timespec="seconds"),
         "since": min(listening) if listening else None,
         "until": max(listening) if listening else None,
         "listeningDays": len(listening), "lastHeard": last_heard,
@@ -328,13 +331,13 @@ def build_site(store, styles, out_dir: Path, *, place: str = "Edinburgh",
 
     # The shell: template + data, with assets fingerprinted for caching.
     assets = {}
-    for name in ("site.css", "site.js"):
+    for name in ("site.css", "freshness.js", "site.js"):
         content = (TEMPLATE_DIR / name).read_bytes()
         _write_atomic(out_dir / "assets" / name, content)
         assets[name] = hashlib.sha256(content).hexdigest()[:10]
     # A small change marker lets an already-open page discover new editions
     # without downloading the whole journal every minute.
-    unstamped = json.dumps([{k: v for k, v in site.items() if k != "generated"},
+    unstamped = json.dumps([{k: v for k, v in site.items() if k not in ("generated", "builtAt")},
                             assets, sorted(keep)], sort_keys=True, default=str)
     fingerprint = hashlib.sha256(unstamped.encode()).hexdigest()[:16]
     site["version"] = fingerprint
@@ -349,7 +352,8 @@ def build_site(store, styles, out_dir: Path, *, place: str = "Edinburgh",
     for token, value in {
         "%%TITLE%%": html.escape(title), "%%DESCRIPTION%%": html.escape(description),
         "%%OG_IMAGE%%": html.escape(og_image), "%%CSS_V%%": assets["site.css"],
-        "%%JS_V%%": assets["site.js"], "%%DATA%%": data,
+        "%%JS_V%%": assets["site.js"], "%%FRESHNESS_V%%": assets["freshness.js"],
+        "%%DATA%%": data,
     }.items():
         page = page.replace(token, value)
     _write_atomic(out_dir / "index.html", page.encode())
@@ -390,16 +394,18 @@ class SitePublisher:
     `refresh_seconds`, so the season's figures stay fresh. When a `deploy` is
     configured (a callable that uploads the folder and may return the site's
     address) it uploads at once for a new painting, and otherwise at most
-    every `deploy_seconds`, and only when something changed. A failure waits
+    every `deploy_seconds` for changed content or a recorder heartbeat. A failure waits
     `retry_seconds` before the next try, and the last upload is remembered in
     `state_path` across restarts, so neither an outage nor a crash loop can
-    become a stream of uploads.
+    become a stream of uploads. With a recorder heartbeat, an unchanged site
+    still uploads on the configured cadence so a quiet garden reports liveness.
     """
 
     def __init__(self, build: Callable[[], dict], latest: Callable[[], int | None],
                  deploy: Callable[[], str | None] | None = None, *,
                  refresh_seconds: float = 3600, deploy_seconds: float = 6 * 3600,
                  retry_seconds: float = 1800, state_path: Path | None = None,
+                 heartbeat: Callable[[], dict] | None = None,
                  clock: Callable[[], float] = time.time):
         self.build = build
         self.latest = latest
@@ -408,6 +414,7 @@ class SitePublisher:
         self.deploy_seconds = deploy_seconds
         self.retry_seconds = retry_seconds
         self.state_path = state_path
+        self.heartbeat = heartbeat
         self.clock = clock
         self._lock = threading.Lock()
         self._running = False
@@ -460,7 +467,7 @@ class SitePublisher:
         last = self._deployed
         if not last or latest != last.get("painting"):
             return True
-        if fingerprint and fingerprint == last.get("fingerprint"):
+        if fingerprint and fingerprint == last.get("fingerprint") and self.heartbeat is None:
             return False
         return self.clock() - float(last.get("at", 0)) >= self.deploy_seconds
 
@@ -473,9 +480,26 @@ class SitePublisher:
                                error=None)
             fingerprint = summary.get("fingerprint")
             if self.deploy and (force_deploy or self._upload_due(latest, fingerprint)):
+                checked_at = datetime.fromtimestamp(self.clock(), timezone.utc).isoformat(timespec="seconds")
+                unchanged = fingerprint and fingerprint == self._deployed.get("fingerprint")
+                updated_at = (self._deployed.get("site_updated_at") if unchanged else None) or checked_at
+                if self.heartbeat is not None:
+                    # Export an allowlisted status, never the listener's detailed
+                    # diagnostics, paths, device names, signal data or errors.
+                    health = self.heartbeat() or {}
+                    state = health.get("state", "unknown")
+                    recorder = ("listening" if health.get("healthy") is True else
+                                state if state in ("paused", "starting", "unknown") else "attention")
+                    interval = max(self.refresh_seconds, self.deploy_seconds)
+                    freshness = {"checkedAt": checked_at, "siteUpdatedAt": updated_at,
+                                 "version": fingerprint, "recorder": recorder,
+                                 "expectedSeconds": interval,
+                                 "staleAfterSeconds": max(900, 3 * interval)}
+                    _write_atomic(Path(summary["path"]) / "freshness.json",
+                                  json.dumps(freshness, separators=(",", ":")).encode())
                 url = self.deploy() or self._deployed.get("url")
                 self._deployed = {"painting": latest, "fingerprint": fingerprint,
-                                  "at": self.clock(), "url": url,
+                                  "at": self.clock(), "url": url, "site_updated_at": updated_at,
                                   "deployed_at": datetime.now().isoformat(timespec="seconds")}
                 self._save_state()
                 self.status.update(url=url, deployed_at=self._deployed["deployed_at"])

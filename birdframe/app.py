@@ -316,8 +316,17 @@ def _make_site_publisher(runtime: Runtime, config: Config):
                           getattr(runtime.detector, "geo_by_scientific", {}))
     return SitePublisher(build, latest=runtime.store.latest_image_id, deploy=deploy,
                          state_path=PUBLIC_STATE_PATH,
+                         heartbeat=lambda: _public_recorder_health(runtime),
                          refresh_seconds=max(1, config.public_refresh_minutes) * 60,
                          deploy_seconds=max(1, config.public_upload_minutes) * 60)
+
+
+def _public_recorder_health(runtime: Runtime) -> dict:
+    """Current audio liveness, independent of whether any birds were detected."""
+    listener = getattr(runtime, "listener", None)
+    if listener is None:
+        return {"healthy": False, "state": "unknown"}
+    return listener.health_snapshot()
 
 
 def _start_scheduler(runtime: Runtime, site=None) -> None:

@@ -221,7 +221,7 @@
     const latest = paintings[0];
     const faces = [...ranked.map(([b]) => b), ...species].filter((b, i, all) => b.photo && all.findIndex(x => x.slug === b.slug) === i).slice(0, 6);
     return `<div class="page observatory">
-      <section class="observatory-hero"><div class="hero-copy"><p class="eyebrow"><span class="status-dot"></span>${esc(DATA.place)} · a birdsong observatory</p><h1>Birds heard<br><em>in ${esc(DATA.place)}.</em></h1><p class="hero-description">Acoustic detections, short recordings and daily paintings from one window. Explore the species and their recorded activity.</p><div class="hero-actions"><a class="button primary" href="#day-${day?.day || ''}">Explore ${day?.day === DATA.today ? 'today' : 'the latest day'} <span>↗</span></a><a class="text-link" href="#birds">Meet the ${species.length} species →</a></div><p class="snapshot">Refreshed every ${DATA.refreshMinutes} minutes · snapshot ${time(DATA.generated)} on ${fmt(DATA.generated.slice(0, 10), 'short')}</p></div>${orbit(day)}</section>
+      <section class="observatory-hero"><div class="hero-copy"><p class="eyebrow">${esc(DATA.place)} · a birdsong observatory</p><h1>Birds heard<br><em>in ${esc(DATA.place)}.</em></h1><p class="hero-description">Acoustic detections, short recordings and daily paintings from one window. Explore the species and their recorded activity.</p><div class="hero-actions"><a class="button primary" href="#day-${day?.day || ''}">Explore ${day?.day === DATA.today ? 'today' : 'the latest day'} <span>↗</span></a><a class="text-link" href="#birds">Meet the ${species.length} species →</a></div><p class="snapshot">Publishing cadence: ${DATA.refreshMinutes} minutes · snapshot built ${time(DATA.generated)} on ${fmt(DATA.generated.slice(0, 10), 'short')}</p></div>${orbit(day)}</section>
       <section class="stats-strip" aria-label="The archive in numbers">${stat(DATA.totalDetections, 'bird detections', 'calls recorded, not individual birds')}${stat(species.length, 'species in the record', 'confirmed and probable identifications')}${stat(DATA.listeningDays, 'days of bird records', `since ${DATA.since ? fmt(DATA.since, 'short') : 'the first call'}`)}${stat(paintings.length, 'original paintings', 'each one begins with birdsong')}</section>
       ${fieldNotes()}
       ${faces.length ? `<section class="section field-guide"><div class="section-head"><div><p class="eyebrow">Meet the neighbours</p><h2>Recorded species</h2></div><a href="#birds">The complete field guide ↗</a></div><div class="photo-strip">${faces.map(b => `<a class="photo-card" href="#b-${b.slug}" style="--bird-color:${color(b.slug)}">${photo(b)}<div><span>${esc(b.name)}</span><small>${number(b.count)} detections · ${b.days} days</small></div></a>`).join('')}</div><p class="chart-note">Species reference photographs from Wikimedia Commons. Open a bird for photo credits and its full record.</p></section>` : ''}
@@ -513,12 +513,48 @@
   }, true);
   document.getElementById('colophon').innerHTML = `<div><p class="eyebrow">${esc(DATA.title)}</p><h2>About this record</h2></div><div><p>BirdNET listens; an image model paints. Explore the acoustic record of a window in ${esc(DATA.place)}.</p><p class="chart-note">Counts are acoustic detections, not individual birds. Only confirmed and probable species appear. Recording coverage is not a measure of absence.</p><p class="snapshot">Snapshot ${fmt(DATA.generated.slice(0, 10), 'medium')} · ${time(DATA.generated)} local time. <a href="#frame">Picture-frame mode ↗</a></p></div>`;
   window.addEventListener('hashchange', render); render();
-  let checkingVersion = false;
-  async function checkVersion() {
-    if (document.hidden || checkingVersion || replayTimer || [...document.querySelectorAll('audio')].some(audio => !audio.paused)) return;
-    checkingVersion = true;
-    try {const response = await fetch('version.json', {cache: 'no-store'}); if (!response.ok) return; const next = await response.json(); if (typeof next.version === 'string' && next.version !== DATA.version) window.location.reload();} catch (_) {} finally {checkingVersion = false;}
+  const freshnessRules = window.BirdframeFreshness;
+  let heartbeat = null, heartbeatFetchFailed = false, checkingVersion = false;
+  const dateFormatter = new Intl.DateTimeFormat('en-GB', {day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit', timeZoneName:'short'});
+  const validDate = value => typeof value === 'string' && Number.isFinite(Date.parse(value));
+  function stampMarkup(iso) {
+    if (!validDate(iso)) return 'Unavailable';
+    return `<time datetime="${esc(iso)}" title="${esc(new Date(iso).toISOString())}">${esc(freshnessRules.relative(iso))}<small>${esc(dateFormatter.format(new Date(iso)))}</small></time>`;
   }
+  function updateFreshness() {
+    const state = freshnessRules.classify(heartbeat, Date.now(), heartbeatFetchFailed);
+    const updated = heartbeat?.version === DATA.version && validDate(heartbeat.siteUpdatedAt) ? heartbeat.siteUpdatedAt : DATA.builtAt;
+    document.getElementById('site-updated').innerHTML = stampMarkup(updated);
+    const badge = document.getElementById('recorder-badge');
+    badge.dataset.state = state.state; badge.title = state.detail;
+    document.getElementById('recorder-state').textContent = state.label;
+    document.getElementById('recorder-checked').innerHTML = validDate(heartbeat?.checkedAt) ? `Last check ${stampMarkup(heartbeat.checkedAt)}` : 'No verified check-in';
+    const interval = Number(heartbeat?.expectedSeconds);
+    document.getElementById('freshness-cadence').textContent = `Publishing every ${Number.isFinite(interval) && interval > 0 ? Math.round(interval / 60) : DATA.refreshMinutes} min`;
+    const notice = document.getElementById('freshness-notice');
+    notice.hidden = state.state === 'online'; notice.textContent = state.detail;
+    const newer = heartbeat?.version !== DATA.version && Date.parse(heartbeat?.siteUpdatedAt) > Date.parse(DATA.builtAt);
+    document.getElementById('refresh-data').hidden = !newer;
+  }
+  document.getElementById('refresh-data').addEventListener('click', () => window.location.reload());
+  async function checkVersion() {
+    if (document.hidden || checkingVersion) return;
+    checkingVersion = true;
+    const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 8000);
+    const read = async name => {const r = await fetch(name, {cache:'no-store', signal:controller.signal}); if (!r.ok) throw Error('Unavailable'); return r.json();};
+    try {
+      const [status, version] = await Promise.allSettled([read('freshness.json'), read('version.json')]);
+      if (status.status === 'fulfilled') {heartbeat = status.value; heartbeatFetchFailed = false;}
+      else heartbeatFetchFailed = true;
+      updateFreshness();
+      // A heartbeat must still update while listening/replaying. Only the full
+      // page reload waits, so it never cuts off a visitor's recording.
+      if (replayTimer || [...document.querySelectorAll('audio')].some(audio => !audio.paused)) return;
+      if (version.status === 'fulfilled' && typeof version.value?.version === 'string' && version.value.version !== DATA.version) window.location.reload();
+    } finally {clearTimeout(timeout); checkingVersion = false;}
+  }
+  updateFreshness(); checkVersion();
   window.setInterval(checkVersion, 60_000);
+  window.setInterval(() => {if (!document.hidden) updateFreshness();}, 30_000);
   document.addEventListener('visibilitychange', () => {if (document.hidden && replayTimer) {clearInterval(replayTimer); replayTimer = null; const button = document.getElementById('replay-toggle'); if (button) {button.textContent = '▶ Play the day'; button.setAttribute('aria-pressed', 'false');}} checkVersion();});
 })();

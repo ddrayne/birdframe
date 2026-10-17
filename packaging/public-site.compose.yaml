@@ -3,6 +3,7 @@
 # The recording computer runs Birdframe and uploads this folder over rsync.
 # Production cadence: public_refresh_minutes = 5 and public_upload_minutes = 5
 # in that computer's config.toml. Coolify serves files; it does not collect data.
+# freshness.json carries the recorder heartbeat even when no new birds are heard.
 # GitHub pushes alone do not update the running recorder or its public export.
 # See README.md, "How public updates work", for dependencies and status checks.
 services:

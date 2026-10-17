@@ -26,6 +26,7 @@ uv run birdframe set-key            # store the OpenAI key in the Keychain (hidd
 uv run birdframe set-key gemini     # same, for the Gemini key
 uv run birdframe set-key cloudflare # the Cloudflare Pages token for the public site
 uv run birdframe publish            # build (and deploy, if configured) the public site now
+node --test tests/js/public_freshness.test.cjs  # public freshness UI rules (Node)
 uv run birdframe install            # run forever: LaunchAgent on macOS, systemd user service on Linux
 ./install.sh                        # one-line setup from a fresh clone (Mac or Raspberry Pi)
 ```
@@ -188,7 +189,13 @@ hard-veto a species via the "not here" blocklist (`config.blocked_species`).
   Coolify/nginx only serves the persistent export. A GitHub push alone does
   not update the app checkout or publish bird data. Open public pages poll
   `version.json` every minute, postponing reload during audio playback/replay.
-  Quiet periods skip unchanged uploads; source downtime leaves the last
+  Quiet periods retain the data version but still upload `freshness.json` on
+  the configured cadence. This heartbeat uses `listener.health_snapshot()`,
+  never detection count, and exports only a coarse state and UTC timestamps.
+  `site_updated_at` persists the last content-change time independently of
+  check-ins. The public status panel polls even during playback/replay and
+  becomes stale after three expected cycles (at least 15 minutes). Missing or
+  failed checks must never imply online. Source downtime leaves the last
   snapshot online. Operational details and checks are in README.md under
   **How public updates work**. Do not confuse repository defaults with these
   production overrides.

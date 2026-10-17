@@ -253,10 +253,11 @@ nginx. Coolify does not collect bird data or pull the live records from GitHub.
    every five minutes, including bird counts, daily records and saved clips.
 3. When the content changes, the configured restricted SSH/rsync uploader sends
    changed files to `/srv/birdframe/public` on Hetzner. Ordinary data uploads
-   have a five-minute minimum gap. New paintings bypass that gap.
-4. An open public page checks `version.json` every minute and reloads when its
-   version changes. It also checks when the tab becomes visible again. Refresh
-   waits while a visitor is playing a recording or running the day replay.
+   have a five-minute minimum gap. New paintings bypass that gap. A small
+   recorder heartbeat is also sent on this cadence when bird data is unchanged.
+4. An open public page checks `version.json` and `freshness.json` every minute
+   and whenever the tab becomes visible again. Status keeps updating during
+   audio playback or day replay; only a full-page reload waits until those stop.
 
 New detections normally appear after the next publishing cycle, plus the build
 and transfer time and up to a minute for an already-open browser to check.
@@ -285,11 +286,24 @@ idle system sleep. Hetzner/Coolify must also be available to receive and serve
 the export. If the Mac is stopped or offline, the public website remains
 available with its last successful snapshot, but cannot acquire new records.
 
-**Quiet periods and failures.** Unchanged content is not uploaded, so an older
-public snapshot timestamp can be normal when no new bird data has arrived.
-The local build time can advance without the last upload time changing. A
-failed build or upload leaves the last successful public files available and
-backs off for 30 minutes before retrying. The last successful upload is saved
+**Freshness and recorder status.** A panel beneath the public navigation shows
+**Site updated** (the last published content change) separately from the
+recorder's latest check-in. Both include relative ages and absolute timestamps
+with an explicit time zone. Healthy audio shows **Recorder online**; paused,
+starting or unhealthy audio has a separate state. No check-in for three expected
+publishing cycles (15 minutes with the production settings) shows **Recorder not
+reporting**. This can indicate recorder or connection trouble; it is not inferred
+from how recently a bird called. A failed browser fetch shows that status cannot
+be checked. Static previews without a heartbeat show status unavailable.
+
+**Quiet periods and failures.** Unchanged bird content keeps the same site
+version and **Site updated** time, while a small heartbeat still uploads on the
+five-minute cadence. The last check-in can therefore be fresh even when no new
+bird data has arrived. Heartbeats contain only the coarse audio state, update
+times, expected interval and site version; listener diagnostics and device data
+stay private. A failed build or upload leaves the last successful public files
+available and backs off for 30 minutes before retrying. The last successful
+upload is saved
 in `~/.local/share/birdframe/public-site.json`, so restarting the app does not
 cause duplicate uploads.
 
@@ -407,13 +421,16 @@ public_deploy_command = 'rsync -rtz --delay-updates --delete-delay --chmod=Du=rw
 Run `uv run birdframe publish` for the first upload, then restart birdframe to
 activate background updates. New paintings upload immediately; changed bird
 data uploads on the configured interval. Failed uploads back off for half an
-hour, and unchanged content is skipped. `--delay-updates` keeps incomplete
+hour. An unchanged edition still sends a recorder heartbeat on the configured
+interval. `--delay-updates` keeps incomplete
 files out of the live site until the transfer finishes. Keep this destination
 dedicated to birdframe: `--delete-delay` removes files absent from its export.
 
-An open public page checks a small `version.json` every minute and reloads
-when a new edition is available, including in frame mode. It also checks when
-the tab becomes visible again. Existing installations retain the default
+An open public page checks `version.json` and the recorder heartbeat in
+`freshness.json` every minute. It reloads for a new edition, including in frame
+mode, while postponing reloads during audio playback or replay. Status updates
+continue during playback. Both checks also run when the tab becomes visible
+again. Existing installations retain the default
 hourly local build and six-hour data-upload interval unless configured above.
 
 **Without an Inky frame**: set `frame_url = ""`. Paintings are still made on

@@ -77,3 +77,10 @@ def test_public_refresh_can_be_faster_for_a_self_hosted_site(tmp_path):
     cfg.public_refresh_minutes = cfg.public_upload_minutes = 5
     publisher = app._make_site_publisher(runtime, cfg)
     assert publisher.refresh_seconds == publisher.deploy_seconds == 300
+
+
+def test_public_recorder_status_uses_audio_health_not_detection_count():
+    runtime = SimpleNamespace(status='listening', last_detection_at=None)
+    assert app._public_recorder_health(runtime) == {'healthy': False, 'state': 'unknown'}
+    runtime.listener = SimpleNamespace(health_snapshot=lambda: {'healthy': True, 'state': 'listening'})
+    assert app._public_recorder_health(runtime) == {'healthy': True, 'state': 'listening'}

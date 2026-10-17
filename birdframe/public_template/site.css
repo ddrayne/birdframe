@@ -685,3 +685,26 @@ input[type="search"], select {border: 1px solid var(--line); border-radius: 5px;
 .explore-page .view-header em { font-style:italic; color:var(--forest); }
 @media(max-width:900px) { .insight-grid { grid-template-columns:1fr; } .insight-card { display:grid; grid-template-columns:25px 1fr; } .insight-card>p,.insight-evidence { grid-column:2; } }
 @media(max-width:720px) { .question-workbench { grid-template-columns:1fr; padding:16px; gap:18px; } .question-answer { border-left:0; border-top:1px solid var(--line); padding:25px 8px 10px; } .question-answer h2 { font-size:27px; } .question-list button { padding:12px; } .insight-card { padding:22px; gap:16px; } .insight-card h3 { font-size:26px; } }
+
+/* Freshness is separate from bird activity: silence is not an offline signal. */
+.freshness-strip { max-width:1280px; margin:0 auto; padding:18px 0; border-bottom:1px solid var(--line); display:flex; flex-wrap:wrap; align-items:center; gap:14px 32px; font:11px/1.5 var(--sans); }
+.freshness-update { display:flex; align-items:center; gap:12px; }
+.freshness-label { color:var(--ink-faint); font-size:9px; text-transform:uppercase; letter-spacing:.1em; }
+.freshness-strip time { color:var(--ink); white-space:nowrap; }
+.freshness-strip time small { display:block; color:var(--ink-faint); font-size:9px; }
+.freshness-recorder { display:flex; align-items:center; gap:14px; }
+.recorder-badge { display:inline-flex; align-items:center; gap:8px; color:var(--ink-soft); }
+.recorder-badge i { width:7px; height:7px; border-radius:50%; background:var(--ink-faint); }
+.recorder-badge[data-state="online"] { color:var(--forest); }
+.recorder-badge[data-state="online"] i { background:var(--forest); }
+.recorder-badge[data-state="stale"],.recorder-badge[data-state="attention"],.recorder-badge[data-state="paused"],.recorder-badge[data-state="starting"] { color:var(--gold); }
+.recorder-badge[data-state="stale"] i,.recorder-badge[data-state="attention"] i,.recorder-badge[data-state="paused"] i,.recorder-badge[data-state="starting"] i { background:var(--gold); }
+.freshness-detail { color:var(--ink-faint); font-size:9px; }
+#freshness-cadence { margin-left:auto; }
+.freshness-notice { flex-basis:100%; color:var(--gold); font-size:10px; }
+.freshness-refresh { background:transparent; border:1px solid var(--line); border-radius:5px; color:var(--forest); font:10px var(--sans); padding:7px 10px; cursor:pointer; }
+@media(max-width:720px) {
+  .freshness-strip { gap:14px 20px; padding-block:15px; }
+  .freshness-recorder { flex-wrap:wrap; gap:5px 12px; }
+  #freshness-cadence { margin-left:0; }
+}

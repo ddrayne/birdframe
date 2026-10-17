@@ -30,9 +30,17 @@
       <a href="#explore" data-nav="explore">Explore</a>
     </nav>
   </header>
+  <aside class="freshness-strip" id="freshness" aria-label="Site freshness and recorder status">
+    <div class="freshness-update"><span class="freshness-label">Site updated</span><span id="site-updated">Checking…</span></div>
+    <div class="freshness-recorder"><span class="recorder-badge" id="recorder-badge" data-state="unknown"><i aria-hidden="true"></i><span id="recorder-state">Checking recorder…</span></span><span id="recorder-checked" class="freshness-detail"></span></div>
+    <span class="freshness-detail" id="freshness-cadence"></span>
+    <button id="refresh-data" class="freshness-refresh" hidden>Newer data available · refresh</button>
+    <p id="freshness-notice" class="freshness-notice" role="status" hidden></p>
+  </aside>
   <main id="main" tabindex="-1"></main>
   <footer class="colophon" id="colophon"></footer>
   <script id="journal-data" type="application/json">%%DATA%%</script>
+  <script src="assets/freshness.js?v=%%FRESHNESS_V%%"></script>
   <script src="assets/site.js?v=%%JS_V%%"></script>
 </body>
 </html>

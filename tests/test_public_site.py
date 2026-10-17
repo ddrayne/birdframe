@@ -309,3 +309,72 @@ def test_public_acoustic_aggregates_weight_each_measured_detection(tmp_path):
     csv = (out / 'species.csv').read_text()
     assert 'Mean SNR dB' in csv and 'European Robin' in csv
     assert 'Great Crested Grebe' not in csv
+
+
+def test_recorder_heartbeat_uploads_during_silence_without_changing_data_time(tmp_path):
+    clock, uploads, fingerprint = Clock(), [], ['same']
+    site = tmp_path / 'site'
+    publisher = SitePublisher(lambda: {'path': str(site), 'fingerprint': fingerprint[0]},
+        latest=lambda: 1, deploy=lambda: uploads.append(json.loads((site / 'freshness.json').read_text())),
+        refresh_seconds=300, deploy_seconds=300, state_path=tmp_path / 'state.json',
+        heartbeat=lambda: {'healthy': True, 'state': 'listening',
+                           'detail': '/private/microphone', 'signal': {'rms_dbfs': -50}}, clock=clock)
+    publisher.run_once()
+    first = uploads[0]
+    assert first['recorder'] == 'listening' and first['staleAfterSeconds'] == 900
+    assert set(first) == {'checkedAt', 'siteUpdatedAt', 'version', 'recorder',
+                         'expectedSeconds', 'staleAfterSeconds'}
+    assert first['checkedAt'].endswith('+00:00')
+    clock.now += 299
+    publisher.run_once()
+    assert len(uploads) == 1
+    clock.now += 1
+    publisher.run_once()
+    assert len(uploads) == 2
+    assert uploads[1]['checkedAt'] != first['checkedAt']
+    assert uploads[1]['siteUpdatedAt'] == first['siteUpdatedAt']
+    assert uploads[1]['version'] == first['version']
+    assert '/private' not in json.dumps(uploads)
+    fingerprint[0] = 'new-data'
+    clock.now += 300
+    publisher.run_once()
+    assert uploads[-1]['version'] == 'new-data'
+    assert uploads[-1]['siteUpdatedAt'] == uploads[-1]['checkedAt']
+    assert uploads[-1]['siteUpdatedAt'] != first['siteUpdatedAt']
+
+
+def test_heartbeat_status_failure_and_restart_preserve_last_success(tmp_path):
+    clock, uploads, broken = Clock(), [], [False]
+    site, state = tmp_path / 'site', tmp_path / 'state.json'
+    health = {'healthy': False, 'state': 'paused'}
+
+    def upload():
+        if broken[0]:
+            raise OSError('offline')
+        uploads.append(json.loads((site / 'freshness.json').read_text()))
+
+    def publisher():
+        return SitePublisher(lambda: {'path': str(site), 'fingerprint': 'same'},
+            latest=lambda: 1, deploy=upload, refresh_seconds=300, deploy_seconds=300,
+            state_path=state, heartbeat=lambda: health, clock=clock)
+
+    first = publisher()
+    first.run_once()
+    assert uploads[0]['recorder'] == 'paused'
+    persisted = state.read_bytes()
+    clock.now += 60
+    restarted = publisher()
+    restarted.run_once()
+    assert len(uploads) == 1  # restart is not an extra heartbeat upload
+    clock.now += 240
+    health.update(state='audio error: /private/device', healthy=False)
+    broken[0] = True
+    restarted.run_once()
+    assert state.read_bytes() == persisted and len(uploads) == 1
+    assert not restarted.due()  # normal failure backoff still applies
+    broken[0] = False
+    clock.now += 1800
+    restarted.run_once()
+    assert uploads[-1]['recorder'] == 'attention'
+    assert uploads[-1]['siteUpdatedAt'] == uploads[0]['siteUpdatedAt']
+    assert '/private' not in json.dumps(uploads)
