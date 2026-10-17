@@ -55,6 +55,8 @@ DEFAULTS = {
     "public_site_url": "",         # where it is hosted, for link previews (optional)
     "public_site_title": "",       # "" = "The <place_name> Window"
     "public_deploy_command": "",   # run after each build; {dir} is the built folder
+    "public_refresh_minutes": 60,  # rebuild bird data; paintings always trigger a build
+    "public_upload_minutes": 360,  # minimum gap for data uploads; paintings go at once
     # Or publish to Cloudflare Pages (free); the API token is a stored key,
     # never here: `birdframe set-key cloudflare`. See cloudflare.py.
     "cloudflare_project": "",      # e.g. "edinburgh-window" → edinburgh-window.pages.dev
@@ -105,6 +107,8 @@ class Config:
     public_site_url: str
     public_site_title: str
     public_deploy_command: str
+    public_refresh_minutes: float
+    public_upload_minutes: float
     cloudflare_project: str
     cloudflare_account_id: str
     path: Path = DEFAULT_CONFIG_PATH

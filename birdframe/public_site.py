@@ -44,6 +44,8 @@ HEADERS_FILE = """\
   Cache-Control: public, max-age=31536000, immutable
 /art/*
   Cache-Control: public, max-age=86400
+/version.json
+  Cache-Control: no-cache
 """
 
 
@@ -270,6 +272,12 @@ def build_site(store, styles, out_dir: Path, *, place: str = "Edinburgh",
         content = (TEMPLATE_DIR / name).read_bytes()
         _write_atomic(out_dir / "assets" / name, content)
         assets[name] = hashlib.sha256(content).hexdigest()[:10]
+    # A small change marker lets an already-open page discover new editions
+    # without downloading the whole journal every minute.
+    unstamped = json.dumps([{k: v for k, v in site.items() if k != "generated"},
+                            assets, sorted(keep)], sort_keys=True, default=str)
+    fingerprint = hashlib.sha256(unstamped.encode()).hexdigest()[:16]
+    site["version"] = fingerprint
     og_image = ""
     if hero_src:
         _write_atomic(out_dir / "og.jpg", _og_image(hero_src))
@@ -286,17 +294,16 @@ def build_site(store, styles, out_dir: Path, *, place: str = "Edinburgh",
         page = page.replace(token, value)
     _write_atomic(out_dir / "index.html", page.encode())
     _write_atomic(out_dir / "_headers", HEADERS_FILE.encode())
+    _write_atomic(out_dir / "version.json", json.dumps({"version": fingerprint}).encode())
 
     for folder in (images_dir, art_dir):   # drop what the archive no longer has
         for stale in (p for p in folder.glob("*") if p.name not in keep) if folder.exists() else ():
             stale.unlink()
     # What the site says, apart from when it was built: lets a deploy skip an
     # upload when nothing has changed since the last one.
-    unstamped = json.dumps([{k: v for k, v in site.items() if k != "generated"},
-                            assets, sorted(keep)], sort_keys=True, default=str)
     return {"paintings": len(paintings), "species": len(species), "days": len(days),
             "path": str(out_dir),
-            "fingerprint": hashlib.sha256(unstamped.encode()).hexdigest()[:16]}
+            "fingerprint": fingerprint}
 
 
 def _og_image(src: Path) -> bytes:

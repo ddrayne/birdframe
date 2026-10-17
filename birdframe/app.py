@@ -301,7 +301,9 @@ def _make_site_publisher(runtime: Runtime, config: Config):
     build = _site_builder(runtime.store, runtime.artist.styles, config, out_dir, deploy,
                           getattr(runtime.detector, "geo_by_scientific", {}))
     return SitePublisher(build, latest=runtime.store.latest_image_id, deploy=deploy,
-                         state_path=PUBLIC_STATE_PATH)
+                         state_path=PUBLIC_STATE_PATH,
+                         refresh_seconds=max(1, config.public_refresh_minutes) * 60,
+                         deploy_seconds=max(1, config.public_upload_minutes) * 60)
 
 
 def _start_scheduler(runtime: Runtime, site=None) -> None:

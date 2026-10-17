@@ -99,10 +99,16 @@ def test_fingerprint_changes_with_the_birds_not_the_clock(tmp_path):
     first = build_site(store, STYLES, out, geo_lookup=GEO, now=datetime(2026, 7, 6, 22))
     again = build_site(store, STYLES, out, geo_lookup=GEO, now=datetime(2026, 7, 6, 23))
     assert again["fingerprint"] == first["fingerprint"]
+    marker = json.loads((out / "version.json").read_text())
+    assert marker == {"version": first["fingerprint"]}
+    assert _data(out)["version"] == marker["version"]
+    marker_mtime = (out / "version.json").stat().st_mtime_ns
     store.add_detection(Detection(datetime(2026, 7, 6, 23, 30), "Erithacus rubecula",
                                   "European Robin", 0.92))
     later = build_site(store, STYLES, out, geo_lookup=GEO, now=datetime(2026, 7, 6, 23))
     assert later["fingerprint"] != first["fingerprint"]
+    assert json.loads((out / "version.json").read_text())["version"] == later["fingerprint"]
+    assert (out / "version.json").stat().st_mtime_ns != marker_mtime
     art = next((out / "art").iterdir())
     before = art.stat().st_mtime_ns
     build_site(store, STYLES, out, geo_lookup=GEO, now=datetime(2026, 7, 6, 23))

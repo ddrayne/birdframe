@@ -270,6 +270,50 @@ that Cloudflare Pages and Netlify apply. All of these settings live only in
 `config.toml`: the LAN dashboard can trigger **Publish now**, but it can't
 change where the site is written or how it's deployed.
 
+### Hetzner with Coolify
+
+Coolify can serve the public edition from a persistent folder while birdframe
+uploads changes over SSH. The last successful upload stays online when the
+listening computer is asleep or offline; it does not need access to the home
+dashboard, microphone or database.
+
+Create a Docker Compose resource using
+[`packaging/public-site.compose.yaml`](packaging/public-site.compose.yaml),
+set the web service's domain and port 80, and create `/srv/birdframe/public`
+on that server. The directory is mounted read-only by the web container and
+survives container restarts and redeployments.
+
+Use a dedicated SSH key for uploads. On the server, restrict its authorized-key
+entry with `restrict,command="/usr/bin/rrsync -wo /srv/birdframe/public"` (verify
+the path to `rrsync` first). This permits rsync writes inside the public folder
+without allowing shell access or forwarding. Verify the server's host key
+through a trusted connection and store it in a dedicated known-hosts file.
+On macOS, install GNU rsync with `brew install rsync` and use its full path
+(usually `/opt/homebrew/bin/rsync`) in the deploy command. Apple's bundled
+OpenRSYNC uses a remote command format that `rrsync` does not accept.
+
+For five-minute bird-data updates, set these config-file-only settings:
+
+```toml
+public_site_dir = "~/.local/share/birdframe/public-site"
+public_site_url = "https://birds.example.org"
+public_refresh_minutes = 5
+public_upload_minutes = 5
+public_deploy_command = 'rsync -rtz --delay-updates --delete-delay --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r -e "ssh -i /absolute/path/to/upload_key -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/absolute/path/to/known_hosts" {dir}/ upload-user@server:./'
+```
+
+Run `uv run birdframe publish` for the first upload, then restart birdframe to
+activate background updates. New paintings upload immediately; changed bird
+data uploads on the configured interval. Failed uploads back off for half an
+hour, and unchanged content is skipped. `--delay-updates` keeps incomplete
+files out of the live site until the transfer finishes. Keep this destination
+dedicated to birdframe: `--delete-delay` removes files absent from its export.
+
+An open public page checks a small `version.json` every minute and reloads
+when a new edition is available, including in frame mode. It also checks when
+the tab becomes visible again. Existing installations retain the default
+hourly local build and six-hour data-upload interval unless configured above.
+
 **Without an Inky frame**: set `frame_url = ""`. Paintings are still made on
 schedule, archived and published; nothing is sent to a display.
 

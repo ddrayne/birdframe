@@ -4,6 +4,7 @@ from birdframe.app import _make_image_client
 from birdframe.cloudflare import CloudflarePages
 from birdframe.config import Config
 from birdframe.image_client import GeminiImageClient, OpenAIImageClient
+from types import SimpleNamespace
 
 
 def _config(tmp_path, provider):
@@ -64,3 +65,15 @@ def test_link_previews_use_the_hosted_address(tmp_path, monkeypatch):
     cfg.public_site_url = "https://birds.example.org"      # a custom domain wins
     app._site_builder(None, [], cfg, tmp_path, Host(), {})()
     assert seen["base_url"] == "https://birds.example.org"
+
+
+def test_public_refresh_can_be_faster_for_a_self_hosted_site(tmp_path):
+    cfg = Config.load(tmp_path / "config.toml")
+    cfg.public_site_dir = str(tmp_path / "site")
+    runtime = SimpleNamespace(store=SimpleNamespace(latest_image_id=lambda: None),
+                              artist=SimpleNamespace(styles=[]), detector=None)
+    publisher = app._make_site_publisher(runtime, cfg)
+    assert publisher.refresh_seconds == 3600 and publisher.deploy_seconds == 6 * 3600
+    cfg.public_refresh_minutes = cfg.public_upload_minutes = 5
+    publisher = app._make_site_publisher(runtime, cfg)
+    assert publisher.refresh_seconds == publisher.deploy_seconds == 300

@@ -247,7 +247,7 @@
     <p>${what} isn't in this journal. <a href="#home">Back to the latest painting</a></p></section></div>`;
 
   // ── frame mode: any tablet becomes a picture frame ─────────────
-  let wakeLock = null, frameTimer = null;
+  let wakeLock = null;
   function enterFrame() {
     const p = paintings[0];
     document.documentElement.style.overflow = 'hidden';
@@ -262,15 +262,12 @@
       frame.classList.remove('quiet'); clearTimeout(hide); hide = setTimeout(quiet, 4000);
     });
     navigator.wakeLock?.request('screen').then(lock => { wakeLock = lock; }).catch(() => {});
-    // A fresh copy of the page carries the newest painting.
-    frameTimer = setTimeout(() => location.reload(), 30 * 60 * 1000);
   }
   function leaveFrame() {
     document.querySelector('.frame-mode')?.remove();
     document.documentElement.style.overflow = '';
     wakeLock?.release?.().catch?.(() => {});
     wakeLock = null;
-    clearTimeout(frameTimer);
   }
 
   // ── routing (plain anchors, so any link to a page works) ──────
@@ -327,4 +324,26 @@
 
   window.addEventListener('hashchange', render);
   render();
+
+  // Keep a tablet in frame mode, or a journal left open, on the latest
+  // successful publication. Offline visits keep displaying the current page.
+  let checkingVersion = false;
+  async function checkVersion() {
+    if (document.hidden || checkingVersion) return;
+    checkingVersion = true;
+    try {
+      const response = await fetch('version.json', {cache: 'no-store'});
+      if (!response.ok) return;
+      const next = await response.json();
+      if (typeof next.version === 'string' && next.version !== DATA.version) {
+        window.location.reload();
+      }
+    } catch (_) {
+      // A temporary outage must not blank a picture frame.
+    } finally {
+      checkingVersion = false;
+    }
+  }
+  window.setInterval(checkVersion, 60_000);
+  document.addEventListener('visibilitychange', checkVersion);
 })();

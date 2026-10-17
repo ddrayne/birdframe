@@ -1,0 +1,40 @@
+# Paste into a Coolify Docker Compose resource. Set the web service's domain
+# to https://birds.apps.drayne.xyz (container port 80).
+services:
+  web:
+    image: nginx:1.29-alpine
+    restart: unless-stopped
+    volumes:
+      - /srv/birdframe/public:/usr/share/nginx/html:ro
+      - type: bind
+        source: ./birdframe-nginx.conf
+        target: /etc/nginx/conf.d/default.conf
+        content: |
+          server {
+            listen 80;
+            server_name _;
+            server_tokens off;
+            root /usr/share/nginx/html;
+            index index.html;
+            gzip on;
+            gzip_types text/css application/javascript application/json;
+
+            # Revalidate the journal and change marker so open pages stay fresh.
+            add_header Cache-Control "no-cache" always;
+            add_header X-Content-Type-Options "nosniff" always;
+
+            location / {
+              limit_except GET { deny all; }
+            }
+            location /images/ {
+              add_header Cache-Control "public, max-age=86400";
+            }
+            # rsync stages incomplete transfers in a hidden directory.
+            location ~ /\. { deny all; }
+          }
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/version.json"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
