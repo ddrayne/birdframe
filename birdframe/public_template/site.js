@@ -129,13 +129,14 @@
   function orbit(day) {
     const values = day?.hours || Array(24).fill(0), max = Math.max(...values, 1);
     const arcs = values.map((n, h) => {
+      if (!n) return '';
       const a = (h / 24 * Math.PI * 2) - Math.PI / 2;
       const x1 = 160 + 98 * Math.cos(a), y1 = 160 + 98 * Math.sin(a);
       const r = 104 + Math.sqrt(n / max) * 43;
       return `<line x1="${x1}" y1="${y1}" x2="${160 + r * Math.cos(a)}" y2="${160 + r * Math.sin(a)}" stroke="hsl(${160 + h * 7} 70% 65%)" stroke-width="10" stroke-linecap="round"><title>${hourLabel(h)} · ${number(n)} detections</title></line>`;
     }).join('');
     return `<div class="orbit"><svg viewBox="0 0 320 320" role="img" aria-label="${esc(day ? `Bird activity on ${fmt(day.day, 'medium')}` : 'Awaiting birdsong')}"><circle class="orbit-guide" cx="160" cy="160" r="92"/><circle class="orbit-guide" cx="160" cy="160" r="150"/>${arcs}<circle class="orbit-center" cx="160" cy="160" r="85"/></svg>
-      <div class="orbit-number"><span class="label">${day?.day === DATA.today ? 'Heard today' : day ? esc(fmt(day.day, 'short')) : 'Waiting to hear'}</span><strong data-count="${day?.species || 0}">${day?.species || 0}</strong><span>species in the soundscape</span></div><span class="orbit-caption">A full day of voices · midnight at the top</span>${[...species].filter(b => b.photo).sort((a, b) => countOn(b, day?.day) - countOn(a, day?.day)).slice(0, 3).map((b, i) => `<a class="orbit-portrait portrait-${i}" href="#b-${b.slug}" title="Meet ${esc(b.name)}">${photo(b, i === 0)}</a>`).join('')}</div>`;
+      <div class="orbit-number"><span class="label">${day?.day === DATA.today ? 'Heard today' : day ? esc(fmt(day.day, 'short')) : 'Waiting to hear'}</span><strong data-count="${day?.species || 0}">${day?.species || 0}</strong><span>species in the soundscape</span></div><span class="orbit-caption">24-hour activity · midnight at the top</span>${[...species].filter(b => b.photo && (!day || countOn(b, day.day) > 0)).sort((a, b) => countOn(b, day?.day) - countOn(a, day?.day)).slice(0, 3).map((b, i) => `<a class="orbit-portrait portrait-${i}" href="#b-${b.slug}" title="Meet ${esc(b.name)}">${photo(b, i === 0)}</a>`).join('')}</div>`;
   }
 
   const recording = (clip, name) => `<div class="recording"><div><b>${esc(name)}</b><span>${fmt(clip.day, 'short')} · ${clip.duration}s · ${Math.round(clip.confidence * 100)}% BirdNET match</span></div><audio controls preload="none" src="${esc(clip.url)}" aria-label="Listen to ${esc(name)}, recorded ${fmt(clip.day, 'medium')}">Your browser cannot play this recording. <a href="${esc(clip.url)}">Open audio</a></audio></div>`;
